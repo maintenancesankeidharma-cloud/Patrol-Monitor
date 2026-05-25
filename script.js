@@ -127,9 +127,27 @@ function formatTime(isoOrDate) {
 
 function getTodayRange() {
     const now = new Date();
-    const start = new Date(now.getFullYear(), now.getMonth(), now.getDate()).toISOString();
-    const end = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 23, 59, 59).toISOString();
-    return { start, end };
+    const hours = (typeof RESET_HOURS !== 'undefined' && RESET_HOURS.length === 2)
+        ? RESET_HOURS.slice().sort((a, b) => a - b)
+        : [7, 20];
+    const h = now.getHours();
+    let periodStart, periodEnd;
+
+    if (h >= hours[1]) {
+        periodStart = new Date(now.getFullYear(), now.getMonth(), now.getDate(), hours[1], 0, 0);
+        periodEnd = new Date(now.getFullYear(), now.getMonth(), now.getDate() + 1, hours[0], 0, 0);
+    } else if (h >= hours[0]) {
+        periodStart = new Date(now.getFullYear(), now.getMonth(), now.getDate(), hours[0], 0, 0);
+        periodEnd = new Date(now.getFullYear(), now.getMonth(), now.getDate(), hours[1], 0, 0);
+    } else {
+        periodStart = new Date(now.getFullYear(), now.getMonth(), now.getDate() - 1, hours[1], 0, 0);
+        periodEnd = new Date(now.getFullYear(), now.getMonth(), now.getDate(), hours[0], 0, 0);
+    }
+
+    return {
+        start: periodStart.toISOString(),
+        end: new Date(periodEnd.getTime() - 1000).toISOString()
+    };
 }
 
 function buildDailyStatusFromLogs(logs) {
