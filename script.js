@@ -106,6 +106,14 @@ function isCurrentUserAdmin() {
     return auth && auth.username === ADMIN_USERNAME;
 }
 
+function canAccessSettings() {
+    const auth = getAuthUser();
+    if (!auth) return false;
+    const email = (auth.username || '').toLowerCase();
+    if (email === ADMIN_USERNAME) return true;
+    return email.startsWith('leader');
+}
+
 function escapeHtml(s) {
     const div = document.createElement('div');
     div.textContent = s || '';
@@ -433,6 +441,10 @@ function closeQRModal() {
 }
 
 function openSettingsModal() {
+    if (!canAccessSettings()) {
+        alert('Hanya Admin dan Leader yang bisa mengakses Pengaturan Jig.');
+        return;
+    }
     const tbody = document.getElementById('settingsTableBody');
     if (!tbody) return;
     tbody.innerHTML = '';
@@ -995,6 +1007,9 @@ document.addEventListener('DOMContentLoaded', () => {
     document.addEventListener('visibilitychange', function () {
         if (!document.hidden) fetchData();
     });
+
+    const btnSettings = document.getElementById('btnSettings');
+    if (btnSettings) btnSettings.style.display = canAccessSettings() ? '' : 'none';
 
     const btnKelola = document.getElementById('btnKelolaAkun');
     if (btnKelola) btnKelola.style.display = isCurrentUserAdmin() ? '' : 'none';
