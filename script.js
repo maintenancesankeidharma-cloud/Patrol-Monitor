@@ -9,10 +9,10 @@ const _supabase = supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
 const DEFAULT_AREAS = (typeof CONFIG_AREAS !== 'undefined' && CONFIG_AREAS.length)
     ? JSON.parse(JSON.stringify(CONFIG_AREAS))
     : [
-        { id: 1, name: 'Jig Inspection 1' },
-        { id: 2, name: 'Jig Inspection 2' },
-        { id: 3, name: 'Jig Inspection 3' },
-        { id: 4, name: 'Jig Inspection 4' }
+        { id: 1, name: 'Jig Inspection 1', area: 'Area 1' },
+        { id: 2, name: 'Jig Inspection 2', area: 'Area 1' },
+        { id: 3, name: 'Jig Inspection 3', area: 'Area 2' },
+        { id: 4, name: 'Jig Inspection 4', area: 'Area 2' }
     ];
 
 const CHECKPOINTS = ['start', 'middle', 'end'];
@@ -35,7 +35,7 @@ async function loadAreasFromSupabase() {
             .eq('id', 1)
             .single();
         if (!error && data && Array.isArray(data.areas) && data.areas.length > 0) {
-            return data.areas.map((a, i) => ({ id: i + 1, name: a.name || '-' }));
+            return data.areas.map((a, i) => ({ id: i + 1, name: a.name || '-', area: a.area || '' }));
         }
     } catch (_) {}
     return null;
@@ -291,6 +291,7 @@ function renderAreaCard(area) {
             <span class="text-[10px] font-black px-2 py-0.5 rounded-full ${complete ? 'bg-emerald-100 text-emerald-700' : 'bg-slate-100 text-slate-500'}">${progressCount}/3</span>
         </div>
         <h3 class="font-black text-slate-800 text-sm leading-tight uppercase">${escapeHtml(area.name)}</h3>
+        ${area.area ? `<p class="text-[10px] font-bold text-indigo-500 mb-1 uppercase">${escapeHtml(area.area)}</p>` : ''}
         <p class="text-[10px] font-bold text-slate-400 mb-4 italic uppercase">PIC: ${escapeHtml(picName)}</p>
         <div class="space-y-2">
             ${renderCheckpointRow('START', status.start, nextCp === 'start')}
@@ -395,6 +396,7 @@ function openQRModal() {
             <div class="text-[9px] font-black text-indigo-500 mb-2 uppercase tracking-widest">#${String(area.id).padStart(2, '0')}</div>
             <div class="qr-placeholder w-32 h-32 mb-3 flex items-center justify-center bg-slate-50 rounded-xl"></div>
             <div class="font-black text-slate-800 text-xs leading-tight mb-1 uppercase">${escapeHtml(area.name)}</div>
+            ${area.area ? `<div class="text-[9px] text-indigo-500 font-bold mb-1">${escapeHtml(area.area)}</div>` : ''}
             <div class="text-[9px] text-slate-400 font-bold">Scan 3×: Start → Middle → End</div>
         `;
         printArea.appendChild(qrCard);
@@ -434,16 +436,17 @@ function openSettingsModal() {
     const tbody = document.getElementById('settingsTableBody');
     if (!tbody) return;
     tbody.innerHTML = '';
-    areas.forEach((a, i) => tbody.appendChild(createSettingsRow(i + 1, a.name)));
+    areas.forEach((a, i) => tbody.appendChild(createSettingsRow(i + 1, a.name, a.area)));
     document.getElementById('settingsModal').style.display = 'flex';
 }
 
-function createSettingsRow(no, name) {
+function createSettingsRow(no, name, area) {
     const tr = document.createElement('tr');
     tr.className = 'border-b border-slate-100 hover:bg-slate-50';
     tr.innerHTML = `
         <td class="py-3 pr-2 text-sm font-bold text-slate-400 text-center">${no}</td>
-        <td class="py-2 pr-2"><input type="text" class="settings-name w-full px-3 py-2 border border-slate-200 rounded-lg text-sm font-bold" value="${(name || '').replace(/"/g, '&quot;')}" placeholder="Nama Jig / Area"></td>
+        <td class="py-2 pr-2"><input type="text" class="settings-name w-full px-3 py-2 border border-slate-200 rounded-lg text-sm font-bold" value="${(name || '').replace(/"/g, '&quot;')}" placeholder="Nama Jig"></td>
+        <td class="py-2 pr-2"><input type="text" class="settings-area w-full px-3 py-2 border border-slate-200 rounded-lg text-sm font-bold" value="${(area || '').replace(/"/g, '&quot;')}" placeholder="Nama Area"></td>
         <td class="py-2"><button type="button" onclick="this.closest('tr').remove()" class="text-red-500 hover:text-red-700 text-lg font-black leading-none" title="Hapus">&times;</button></td>
     `;
     return tr;
@@ -452,7 +455,7 @@ function createSettingsRow(no, name) {
 function addSettingsRow() {
     const tbody = document.getElementById('settingsTableBody');
     const nextNo = tbody.querySelectorAll('tr').length + 1;
-    tbody.appendChild(createSettingsRow(nextNo, ''));
+    tbody.appendChild(createSettingsRow(nextNo, '', ''));
 }
 
 async function saveSettings() {
@@ -460,8 +463,9 @@ async function saveSettings() {
     const newAreas = [];
     rows.forEach((row, i) => {
         const name = (row.querySelector('.settings-name') || {}).value || '';
+        const area = (row.querySelector('.settings-area') || {}).value || '';
         if (name.trim()) {
-            newAreas.push({ id: i + 1, name: name.trim() });
+            newAreas.push({ id: i + 1, name: name.trim(), area: area.trim() });
         }
     });
     if (!newAreas.length) {
@@ -584,13 +588,15 @@ function formatDateTimeExport(iso) {
 }
 
 function parseImportHeaderIndex(headers) {
-    const idx = { name: -1 };
+    const idx = { name: -1, area: -1 };
     headers.forEach((h, i) => {
         const key = String(h || '').trim().toLowerCase();
         if (/^(no|id|#)$/.test(key)) return;
-        if (/jig|area|zona|lokasi|nama/.test(key)) idx.name = i;
+        if (/jig|nama\s*jig/.test(key)) idx.name = i;
+        else if (/area|zona|lokasi/.test(key)) idx.area = i;
     });
     if (idx.name < 0) idx.name = 0;
+    if (idx.area < 0 && headers.length >= 2) idx.area = idx.name === 0 ? 1 : 0;
     return idx;
 }
 
@@ -599,7 +605,7 @@ function rowsToAreas(matrix) {
     const firstRow = matrix[0].map(c => String(c == null ? '' : c).trim());
     const looksLikeHeader = firstRow.some(c => /jig|area|zona|lokasi|nama/i.test(c));
     let dataRows = matrix;
-    let colIdx = { name: 0 };
+    let colIdx = { name: 0, area: 1 };
 
     if (looksLikeHeader) {
         colIdx = parseImportHeaderIndex(firstRow);
@@ -610,8 +616,9 @@ function rowsToAreas(matrix) {
     dataRows.forEach(row => {
         if (!row || !row.length) return;
         const name = String(row[colIdx.name] == null ? '' : row[colIdx.name]).trim();
+        const area = colIdx.area >= 0 ? String(row[colIdx.area] == null ? '' : row[colIdx.area]).trim() : '';
         if (!name) return;
-        result.push({ name });
+        result.push({ name, area });
     });
     return result;
 }
@@ -631,14 +638,14 @@ function downloadImportTemplate() {
         return;
     }
     const wsData = [
-        ['Nama Jig / Area'],
-        ['Jig Inspection 1'],
-        ['Jig Inspection 2'],
-        ['Jig Inspection 3']
+        ['Nama Jig', 'Nama Area'],
+        ['Jig Inspection 1', 'Area 1'],
+        ['Jig Inspection 2', 'Area 1'],
+        ['Jig Inspection 3', 'Area 2']
     ];
     const wb = XLSX.utils.book_new();
     const ws = XLSX.utils.aoa_to_sheet(wsData);
-    ws['!cols'] = [{ wch: 30 }];
+    ws['!cols'] = [{ wch: 28 }, { wch: 20 }];
     XLSX.utils.book_append_sheet(wb, ws, 'Daftar Jig');
     XLSX.writeFile(wb, 'Template_Import_Jig_Patrol_QC.xlsx');
 }
@@ -748,6 +755,7 @@ function buildCheckpointRows(logs, dateLabel) {
             shift: shiftLabel,
             pic: picName,
             jig: area.name,
+            areaName: area.area || '',
             start: formatDateTimeExport(rec.start),
             middle: formatDateTimeExport(rec.middle),
             end: formatDateTimeExport(rec.end),
@@ -790,7 +798,7 @@ async function exportCheckpointLog() {
     const rows = buildCheckpointRows(logs, label);
 
     const header = [
-        'Tanggal', 'Shift', 'PIC Patrol', 'Nama Jig / Area',
+        'Tanggal', 'Shift', 'PIC Patrol', 'Nama Jig', 'Nama Area',
         'Timestamp START', 'Operator START',
         'Timestamp MIDDLE', 'Operator MIDDLE',
         'Timestamp END', 'Operator END',
@@ -799,7 +807,7 @@ async function exportCheckpointLog() {
     let csv = csvRow(header);
     rows.forEach(r => {
         csv += csvRow([
-            r.tanggal, r.shift, r.pic, r.jig,
+            r.tanggal, r.shift, r.pic, r.jig, r.areaName,
             r.start, r.operatorStart,
             r.middle, r.operatorMiddle,
             r.end, r.operatorEnd,
@@ -811,7 +819,7 @@ async function exportCheckpointLog() {
         const aoa = [header];
         rows.forEach(r => {
             aoa.push([
-                r.tanggal, r.shift, r.pic, r.jig,
+                r.tanggal, r.shift, r.pic, r.jig, r.areaName,
                 r.start, r.operatorStart,
                 r.middle, r.operatorMiddle,
                 r.end, r.operatorEnd,
@@ -820,7 +828,7 @@ async function exportCheckpointLog() {
         });
         const wb = XLSX.utils.book_new();
         const ws = XLSX.utils.aoa_to_sheet(aoa);
-        ws['!cols'] = [{ wch: 12 }, { wch: 10 }, { wch: 20 }, { wch: 24 }, { wch: 20 }, { wch: 16 }, { wch: 20 }, { wch: 16 }, { wch: 20 }, { wch: 16 }, { wch: 14 }];
+        ws['!cols'] = [{ wch: 12 }, { wch: 10 }, { wch: 20 }, { wch: 24 }, { wch: 16 }, { wch: 20 }, { wch: 16 }, { wch: 20 }, { wch: 16 }, { wch: 20 }, { wch: 16 }, { wch: 14 }];
         XLSX.utils.book_append_sheet(wb, ws, 'Checkpoint');
         XLSX.writeFile(wb, `Patrol_QC_Checkpoint_${label}.xlsx`);
     } else {
