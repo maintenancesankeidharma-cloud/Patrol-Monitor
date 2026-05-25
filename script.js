@@ -6,12 +6,6 @@ const SUPABASE_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZ
 
 const _supabase = supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
 
-const ACCOUNT_PROFILES = {
-    'admin@patrol-qc.com':   { displayName: 'Admin',         shift: null },
-    'shift-a@patrol-qc.com': { displayName: 'Tori Maryono',  shift: 'A' },
-    'shift-b@patrol-qc.com': { displayName: 'M. Iqbal',      shift: 'B' }
-};
-
 const DEFAULT_AREAS = (typeof CONFIG_AREAS !== 'undefined' && CONFIG_AREAS.length)
     ? JSON.parse(JSON.stringify(CONFIG_AREAS))
     : [
@@ -25,30 +19,43 @@ const CHECKPOINTS = ['start', 'middle', 'end'];
 const CHECKPOINT_LABELS = { start: 'START', middle: 'MIDDLE', end: 'END' };
 
 const STORAGE_KEY = 'patrol_areas';
-const STORAGE_KEY_LEGACY = 'patrol_jigs';
 const AUTH_STORAGE_KEY = 'patrol_auth';
 const USERS_STORAGE_KEY = 'patrol_users';
 const ADMIN_USERNAME = 'admin@patrol-qc.com';
 
-let areas = loadAreasFromStorage();
+let areas = JSON.parse(JSON.stringify(DEFAULT_AREAS));
 let dailyStatus = {};
 let recentHistory = [];
 
-function loadAreasFromStorage() {
+async function loadAreasFromSupabase() {
     try {
-        let raw = localStorage.getItem(STORAGE_KEY);
-        if (!raw) raw = localStorage.getItem(STORAGE_KEY_LEGACY);
-        if (raw) {
-            const parsed = JSON.parse(raw);
-            if (Array.isArray(parsed) && parsed.length > 0) {
-                return parsed.map((a, i) => ({
-                    id: i + 1,
-                    name: a.name || '-'
-                }));
-            }
+        const { data, error } = await _supabase
+            .from('patrol_config')
+            .select('areas')
+            .eq('id', 1)
+            .single();
+        if (!error && data && Array.isArray(data.areas) && data.areas.length > 0) {
+            return data.areas.map((a, i) => ({ id: i + 1, name: a.name || '-' }));
         }
     } catch (_) {}
-    return JSON.parse(JSON.stringify(DEFAULT_AREAS));
+    return null;
+}
+
+async function saveAreasToSupabase(areasData) {
+    try {
+        const payload = { id: 1, areas: areasData, updated_at: new Date().toISOString() };
+        const { error } = await _supabase
+            .from('patrol_config')
+            .upsert(payload, { onConflict: 'id' });
+        if (error) {
+            console.error('Gagal simpan config ke Supabase:', error.message);
+            return false;
+        }
+        return true;
+    } catch (e) {
+        console.error('Error simpan config:', e);
+        return false;
+    }
 }
 
 function saveAreasToStorage() {
@@ -154,6 +161,14 @@ function getNextCheckpoint(jigId) {
 
 async function fetchData() {
     try {
+        const supaAreas = await loadAreasFromSupabase();
+        if (supaAreas) {
+            areas = supaAreas;
+            saveAreasToStorage();
+        } else if (areas.length === 0) {
+            areas = JSON.parse(JSON.stringify(DEFAULT_AREAS));
+        }
+
         const { start, end } = getTodayRange();
         const { data: logsToday } = await _supabase
             .from('patrol_logs')
@@ -440,7 +455,7 @@ function addSettingsRow() {
     tbody.appendChild(createSettingsRow(nextNo, ''));
 }
 
-function saveSettings() {
+async function saveSettings() {
     const rows = document.querySelectorAll('#settingsTableBody tr');
     const newAreas = [];
     rows.forEach((row, i) => {
@@ -454,14 +469,20 @@ function saveSettings() {
         return;
     }
     areas = newAreas.map((a, i) => ({ ...a, id: i + 1 }));
+
+    const saved = await saveAreasToSupabase(areas);
+    if (!saved) {
+        alert('Gagal menyimpan ke server. Pastikan tabel patrol_config sudah dibuat di Supabase.');
+    }
     saveAreasToStorage();
     closeSettingsModal();
     renderUI();
 }
 
-function resetSettingsToDefault() {
+async function resetSettingsToDefault() {
     if (!confirm('Reset semua area ke default?')) return;
     areas = JSON.parse(JSON.stringify(DEFAULT_AREAS));
+    await saveAreasToSupabase(areas);
     saveAreasToStorage();
     openSettingsModal();
     renderUI();
@@ -659,6 +680,7 @@ function handleExcelImport(inputEl) {
                 areas = merged.map((a, i) => ({ ...a, id: i + 1 }));
             }
 
+            saveAreasToSupabase(areas);
             saveAreasToStorage();
             openSettingsModal();
             renderUI();
