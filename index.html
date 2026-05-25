@@ -1,0 +1,220 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Patrol QC — Monitoring Checkpoint</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://unpkg.com/@supabase/supabase-js@2"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
+    <script src="https://cdn.sheetjs.com/xlsx-0.20.1/package/dist/xlsx.full.min.js"></script>
+    <link rel="stylesheet" href="style.css">
+</head>
+<body class="bg-slate-100 min-h-screen font-sans">
+
+    <header id="appHeader" class="bg-white shadow-sm border-b sticky top-0 z-40">
+        <div class="max-w-7xl mx-auto px-6 py-4 flex flex-col md:flex-row justify-between items-center gap-4">
+            <div>
+                <h1 class="text-2xl font-black text-slate-800 tracking-tight">PATROL QC — CHECKPOINT</h1>
+                <p id="currentDate" class="text-slate-500 font-bold text-sm uppercase tracking-wider italic"></p>
+                <p id="loginAsIndicator" class="text-slate-400 text-xs font-bold mt-1"></p>
+            </div>
+            <div class="flex flex-wrap gap-3 items-center">
+                <button onclick="openSettingsModal()" class="bg-slate-600 hover:bg-slate-700 text-white px-5 py-2.5 rounded-xl font-black text-xs shadow-lg transition-all active:scale-95">
+                    PENGATURAN JIG
+                </button>
+                <button onclick="openQRModal()" class="bg-indigo-600 hover:bg-indigo-700 text-white px-5 py-2.5 rounded-xl font-black text-xs shadow-lg transition-all active:scale-95">
+                    GENERATE BARCODE
+                </button>
+                <button onclick="openExportModal()" class="bg-emerald-600 hover:bg-emerald-700 text-white px-5 py-2.5 rounded-xl font-black text-xs shadow-lg transition-all active:scale-95">
+                    EXPORT LOG
+                </button>
+                <button id="btnKelolaAkun" onclick="openAccountsModal()" class="bg-amber-500 hover:bg-amber-600 text-white px-5 py-2.5 rounded-xl font-black text-xs shadow-lg transition-all active:scale-95" style="display:none">
+                    KELOLA AKUN
+                </button>
+                <button onclick="handleLogout()" id="btnLogout" class="bg-red-50 hover:bg-red-100 text-red-600 px-4 py-2 rounded-xl font-black text-[11px] shadow-sm border border-red-100 transition-all active:scale-95">
+                    Logout
+                </button>
+            </div>
+        </div>
+    </header>
+
+    <input type="text" id="barcodeScannerInput" class="sr-only" autocomplete="off" tabindex="-1" aria-hidden="true">
+
+    <main id="viewMonitoring" class="max-w-7xl mx-auto px-6 py-8">
+        <div class="mb-8 bg-white p-6 rounded-3xl shadow-sm border flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
+            <div>
+                <p class="text-slate-400 font-black text-xs uppercase mb-1">Progress Checkpoint Hari Ini</p>
+                <h2 id="overallProgress" class="text-4xl font-black text-slate-800">0/0</h2>
+                <p class="text-slate-400 text-xs font-bold mt-1">Jig lengkap = Start + Middle + End tercatat</p>
+            </div>
+            <div class="text-right space-y-2">
+                <span class="bg-indigo-100 text-indigo-700 px-4 py-2 rounded-full font-black text-xs uppercase">Line: QC Patrol</span>
+                <p class="text-[10px] text-slate-400 font-bold italic">Scan barcode 3× di jig yang sama: Start → Middle → End</p>
+            </div>
+        </div>
+
+        <div id="jigGrid" class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6">
+        </div>
+
+        <div class="mt-12 bg-white rounded-3xl shadow-sm border overflow-hidden">
+            <div class="p-6 border-b bg-slate-50 flex justify-between items-center">
+                <h2 class="text-lg font-black text-slate-800 italic uppercase">History Scan Terbaru</h2>
+                <span class="text-[10px] font-black text-slate-400 uppercase">50 log terakhir</span>
+            </div>
+            <div class="overflow-x-auto">
+                <table class="w-full text-left border-collapse">
+                    <thead class="bg-slate-50">
+                        <tr>
+                            <th class="p-4 text-xs font-black text-slate-400 uppercase tracking-widest">Waktu Scan</th>
+                            <th class="p-4 text-xs font-black text-slate-400 uppercase tracking-widest">Operator QC</th>
+                            <th class="p-4 text-xs font-black text-slate-400 uppercase tracking-widest">Jig / Area</th>
+                            <th class="p-4 text-xs font-black text-slate-400 uppercase tracking-widest">Checkpoint</th>
+                        </tr>
+                    </thead>
+                    <tbody id="activityTable" class="divide-y text-slate-700">
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </main>
+
+    <div id="qrModal" class="fixed inset-0 bg-slate-900/80 hidden z-50 flex items-center justify-center p-4 backdrop-blur-sm">
+        <div class="bg-white rounded-[2.5rem] max-w-5xl w-full max-h-[90vh] overflow-y-auto p-8 shadow-2xl">
+            <div class="flex justify-between items-center mb-8 border-b pb-6">
+                <div>
+                    <h2 class="text-2xl font-black text-slate-800">BARCODE JIG INSPECTION</h2>
+                    <p class="text-slate-400 text-sm font-bold uppercase italic">Tempel barcode di masing-masing area jig inspection</p>
+                </div>
+                <button onclick="closeQRModal()" class="bg-slate-100 hover:bg-red-100 text-slate-400 hover:text-red-500 w-12 h-12 rounded-full flex items-center justify-center text-3xl transition-all">&times;</button>
+            </div>
+            <div id="qrPrintArea" class="grid grid-cols-2 md:grid-cols-4 gap-6 p-2"></div>
+            <div class="mt-10 flex justify-end gap-4 border-t pt-8 no-print">
+                <button onclick="window.print()" class="bg-slate-800 text-white px-8 py-3 rounded-2xl font-black text-sm hover:bg-black transition-all">CETAK SEKARANG</button>
+                <button onclick="closeQRModal()" class="bg-slate-100 text-slate-500 px-8 py-3 rounded-2xl font-black text-sm hover:bg-slate-200 transition-all">TUTUP</button>
+            </div>
+        </div>
+    </div>
+
+    <div id="settingsModal" class="fixed inset-0 bg-slate-900/80 hidden z-50 flex items-center justify-center p-4 backdrop-blur-sm">
+        <div class="bg-white rounded-[2.5rem] max-w-4xl w-full max-h-[90vh] overflow-hidden flex flex-col shadow-2xl">
+            <div class="p-6 border-b bg-slate-50 flex justify-between items-center">
+                <div>
+                    <h2 class="text-xl font-black text-slate-800">Pengaturan Area & PIC Patrol</h2>
+                    <p class="text-slate-500 text-sm font-bold">Ubah nama PIC, area jig, dan shift (A / B)</p>
+                </div>
+                <button onclick="closeSettingsModal()" class="bg-slate-200 hover:bg-slate-300 w-10 h-10 rounded-full flex items-center justify-center text-xl text-slate-600 transition-all">&times;</button>
+            </div>
+            <div class="overflow-y-auto p-6 flex-1">
+                <div class="mb-6 p-4 rounded-2xl border-2 border-dashed border-indigo-200 bg-indigo-50/50">
+                    <p class="text-xs font-black text-indigo-700 uppercase mb-3">Import / Template Excel</p>
+                    <p class="text-[11px] text-slate-600 font-bold mb-3">Kolom: <span class="font-black">PIC Patrol</span>, <span class="font-black">Nama Jig / Area</span>, <span class="font-black">Shift (A/B)</span></p>
+                    <div class="flex flex-wrap gap-2">
+                        <button type="button" onclick="downloadImportTemplate()" class="px-4 py-2 rounded-xl font-black text-xs bg-white border border-indigo-200 text-indigo-700 hover:bg-indigo-100 transition-all">
+                            Download Template
+                        </button>
+                        <button type="button" onclick="document.getElementById('excelImportInput').click()" class="px-4 py-2 rounded-xl font-black text-xs bg-indigo-600 text-white hover:bg-indigo-700 transition-all">
+                            Import Excel
+                        </button>
+                    </div>
+                    <input type="file" id="excelImportInput" accept=".xlsx,.xls,.csv" class="hidden" onchange="handleExcelImport(this)">
+                </div>
+                <table class="w-full text-left border-collapse">
+                    <thead>
+                        <tr class="border-b border-slate-200">
+                            <th class="pb-3 text-xs font-black text-slate-400 uppercase">No</th>
+                            <th class="pb-3 text-xs font-black text-slate-400 uppercase">PIC Patrol</th>
+                            <th class="pb-3 text-xs font-black text-slate-400 uppercase">Nama Jig / Area</th>
+                            <th class="pb-3 text-xs font-black text-slate-400 uppercase">Shift</th>
+                            <th class="pb-3 text-xs font-black text-slate-400 uppercase w-20">Hapus</th>
+                        </tr>
+                    </thead>
+                    <tbody id="settingsTableBody"></tbody>
+                </table>
+                <button type="button" onclick="addSettingsRow()" class="mt-4 w-full py-3 border-2 border-dashed border-slate-300 rounded-xl text-slate-500 font-black text-sm hover:bg-slate-50 hover:border-slate-400 transition-all">
+                    + Tambah Jig
+                </button>
+            </div>
+            <div class="p-6 border-t bg-slate-50 flex flex-wrap gap-3 justify-end">
+                <button type="button" onclick="resetSettingsToDefault()" class="px-5 py-2.5 rounded-xl font-black text-xs bg-slate-200 text-slate-600 hover:bg-slate-300 transition-all">Reset ke Default</button>
+                <button type="button" onclick="saveSettings()" class="px-6 py-2.5 rounded-xl font-black text-xs bg-emerald-600 text-white hover:bg-emerald-700 transition-all">Simpan</button>
+                <button type="button" onclick="closeSettingsModal()" class="px-5 py-2.5 rounded-xl font-black text-xs bg-slate-800 text-white hover:bg-slate-900 transition-all">Tutup</button>
+            </div>
+        </div>
+    </div>
+
+    <div id="exportModal" class="fixed inset-0 bg-slate-900/80 hidden z-50 flex items-center justify-center p-4 backdrop-blur-sm">
+        <div class="bg-white rounded-[2.5rem] max-w-md w-full shadow-2xl p-6">
+            <div class="flex justify-between items-center mb-6 border-b pb-4">
+                <div>
+                    <h2 class="text-xl font-black text-slate-800">Export Log</h2>
+                    <p class="text-slate-500 text-sm font-bold">Pilih tanggal dan format file</p>
+                </div>
+                <button onclick="closeExportModal()" class="bg-slate-200 hover:bg-slate-300 w-10 h-10 rounded-full flex items-center justify-center text-xl text-slate-600">&times;</button>
+            </div>
+            <div class="space-y-4 mb-6">
+                <div>
+                    <label for="exportDate" class="block text-xs font-black text-slate-500 uppercase mb-1.5">Tanggal</label>
+                    <input type="date" id="exportDate" class="w-full px-3 py-2.5 rounded-xl border border-slate-200 text-sm font-bold">
+                </div>
+            </div>
+            <div class="flex flex-col gap-2">
+                <button type="button" onclick="exportCheckpointLog()" class="w-full py-3 rounded-xl font-black text-xs bg-emerald-600 text-white hover:bg-emerald-700 transition-all">
+                    Export Checkpoint (Start / Middle / End)
+                </button>
+                <button type="button" onclick="exportDetailLog()" class="w-full py-3 rounded-xl font-black text-xs bg-slate-700 text-white hover:bg-slate-800 transition-all">
+                    Export Detail Scan (per baris)
+                </button>
+                <button type="button" onclick="closeExportModal()" class="w-full py-2.5 rounded-xl font-black text-xs bg-slate-200 text-slate-600 hover:bg-slate-300 transition-all">
+                    Batal
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <div id="accountsModal" class="fixed inset-0 bg-slate-900/80 hidden z-50 flex items-center justify-center p-4 backdrop-blur-sm">
+        <div class="bg-white rounded-[2.5rem] max-w-2xl w-full max-h-[90vh] overflow-hidden flex flex-col shadow-2xl">
+            <div class="p-6 border-b bg-slate-50 flex justify-between items-center">
+                <div>
+                    <h2 class="text-xl font-black text-slate-800">Kelola Akun</h2>
+                    <p class="text-slate-500 text-sm font-bold">Tambah atau hapus akun operator (hanya admin)</p>
+                </div>
+                <button onclick="closeAccountsModal()" class="bg-slate-200 hover:bg-slate-300 w-10 h-10 rounded-full flex items-center justify-center text-xl text-slate-600 transition-all">&times;</button>
+            </div>
+            <div class="overflow-y-auto p-6 flex-1">
+                <table class="w-full text-left border-collapse">
+                    <thead>
+                        <tr class="border-b border-slate-200">
+                            <th class="pb-3 text-xs font-black text-slate-400 uppercase">No</th>
+                            <th class="pb-3 text-xs font-black text-slate-400 uppercase">Username</th>
+                            <th class="pb-3 text-xs font-black text-slate-400 uppercase">Password</th>
+                            <th class="pb-3 text-xs font-black text-slate-400 uppercase w-20">Hapus</th>
+                        </tr>
+                    </thead>
+                    <tbody id="accountsTableBody"></tbody>
+                </table>
+                <div class="mt-6 pt-6 border-t border-slate-200">
+                    <p class="text-xs font-black text-slate-500 uppercase mb-3">Tambah akun baru</p>
+                    <div class="flex flex-wrap gap-3 items-end">
+                        <div class="flex-1 min-w-[120px]">
+                            <label class="block text-[11px] font-bold text-slate-500 uppercase mb-1">Username</label>
+                            <input type="text" id="newAccountUser" placeholder="username" class="w-full px-3 py-2 rounded-xl border border-slate-200 text-sm font-bold">
+                        </div>
+                        <div class="flex-1 min-w-[120px]">
+                            <label class="block text-[11px] font-bold text-slate-500 uppercase mb-1">Password</label>
+                            <input type="password" id="newAccountPass" placeholder="password" class="w-full px-3 py-2 rounded-xl border border-slate-200 text-sm font-bold">
+                        </div>
+                        <button type="button" onclick="addAccountFromForm()" class="px-5 py-2.5 rounded-xl font-black text-xs bg-indigo-600 text-white hover:bg-indigo-700 transition-all">Tambah</button>
+                    </div>
+                </div>
+            </div>
+            <div class="p-6 border-t bg-slate-50">
+                <button type="button" onclick="closeAccountsModal()" class="px-6 py-2.5 rounded-xl font-black text-xs bg-slate-800 text-white hover:bg-slate-900 transition-all">Tutup</button>
+            </div>
+        </div>
+    </div>
+
+    <script src="config.js"></script>
+    <script src="script.js"></script>
+</body>
+</html>

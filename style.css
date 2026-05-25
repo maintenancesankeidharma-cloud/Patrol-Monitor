@@ -1,0 +1,38 @@
+/* Card status checkpoint */
+.card-complete {
+    border-left: 8px solid #10b981;
+    border-top: 1px solid #e5e7eb;
+}
+
+.card-partial {
+    border-left: 8px solid #f59e0b;
+    border-top: 1px solid #e5e7eb;
+}
+
+.card-inactive {
+    border-left: 8px solid #ef4444;
+    border-top: 1px solid #e5e7eb;
+}
+
+.sr-only {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    padding: 0;
+    margin: -1px;
+    overflow: hidden;
+    clip: rect(0, 0, 0, 0);
+    white-space: nowrap;
+    border: 0;
+}
+
+@media print {
+    .no-print { display: none !important; }
+    #appHeader { display: none !important; }
+    body { background: white; }
+    .qr-card-print { break-inside: avoid; page-break-inside: avoid; }
+}
+
+.transition-all {
+    transition: all 0.3s ease-in-out;
+}

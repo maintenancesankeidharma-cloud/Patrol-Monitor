@@ -1,0 +1,129 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Login - Patrol QC Checkpoint</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://unpkg.com/@supabase/supabase-js@2"></script>
+    <link rel="stylesheet" href="style.css">
+</head>
+<body class="bg-slate-100 min-h-screen font-sans flex items-center justify-center px-4">
+    <main class="w-full max-w-md">
+        <div class="bg-white rounded-3xl shadow-xl border border-slate-200 p-8 space-y-6">
+            <div class="text-center space-y-1">
+                <p class="text-xs font-black text-indigo-500 tracking-[0.3em] uppercase">QC Patrol</p>
+                <h1 class="text-2xl font-black text-slate-800 tracking-tight">Login Patrol QC</h1>
+                <p class="text-xs text-slate-500 font-bold uppercase italic">Masuk untuk scan checkpoint Jig Inspection</p>
+            </div>
+            <form id="loginForm" class="space-y-4">
+                <div>
+                    <label for="loginUser" class="block text-xs font-black text-slate-500 uppercase mb-1.5">Email / Username</label>
+                    <input id="loginUser" type="text" autocomplete="username" required
+                        class="w-full px-3 py-2.5 rounded-xl border border-slate-200 text-sm font-bold text-slate-800 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500"
+                        placeholder="mis. admin@patrol-qc.com">
+                </div>
+                <div>
+                    <label for="loginPass" class="block text-xs font-black text-slate-500 uppercase mb-1.5">Password</label>
+                    <input id="loginPass" type="password" autocomplete="current-password" required
+                        class="w-full px-3 py-2.5 rounded-xl border border-slate-200 text-sm font-bold text-slate-800 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500"
+                        placeholder="********">
+                </div>
+                <p class="text-[11px] text-slate-400 font-bold italic">
+                    Gunakan akun email yang terdaftar di Supabase baru Anda.
+                </p>
+                <button type="submit"
+                    class="w-full bg-indigo-600 hover:bg-indigo-700 text-white py-2.5 rounded-xl font-black text-xs uppercase tracking-wide shadow-md active:scale-95 transition-all">
+                    Masuk
+                </button>
+            </form>
+        </div>
+    </main>
+
+    <script>
+        const AUTH_STORAGE_KEY = 'patrol_auth';
+        const USERS_STORAGE_KEY = 'patrol_users';
+        const SUPABASE_URL = 'YOUR_SUPABASE_URL';
+        const SUPABASE_KEY = 'YOUR_SUPABASE_ANON_KEY';
+        const ADMIN_USERNAME = 'admin@patrol-qc.com';
+
+        const _supabase = supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
+
+        function saveAuthState(loggedIn, username) {
+            try {
+                localStorage.setItem(AUTH_STORAGE_KEY, JSON.stringify({
+                    loggedIn: !!loggedIn,
+                    username: username || null
+                }));
+            } catch (_) {}
+        }
+
+        function isLoggedIn() {
+            try {
+                var raw = localStorage.getItem(AUTH_STORAGE_KEY);
+                if (!raw) return false;
+                var parsed = JSON.parse(raw);
+                return !!parsed && !!parsed.loggedIn;
+            } catch (_) {
+                return false;
+            }
+        }
+
+        function getStoredUsers() {
+            try {
+                var raw = localStorage.getItem(USERS_STORAGE_KEY);
+                if (!raw) return [];
+                var parsed = JSON.parse(raw);
+                return Array.isArray(parsed) ? parsed : [];
+            } catch (_) {
+                return [];
+            }
+        }
+
+        document.addEventListener('DOMContentLoaded', function () {
+            if (isLoggedIn()) {
+                window.location.href = 'index.html';
+                return;
+            }
+
+            document.getElementById('loginForm').addEventListener('submit', async function (e) {
+                e.preventDefault();
+                var email = (document.getElementById('loginUser').value || '').trim();
+                var password = document.getElementById('loginPass').value || '';
+
+                if (!email || !password) {
+                    alert('Email dan password wajib diisi.');
+                    return;
+                }
+
+                var localUsers = getStoredUsers();
+                var localMatch = localUsers.find(function (u) {
+                    return (u.username || '').toLowerCase() === email.toLowerCase() && u.password === password;
+                });
+
+                if (localMatch) {
+                    saveAuthState(true, localMatch.username);
+                    window.location.href = 'index.html';
+                    return;
+                }
+
+                try {
+                    const { data, error } = await _supabase.auth.signInWithPassword({
+                        email: email,
+                        password: password
+                    });
+                    if (error) {
+                        alert('Login gagal: ' + (error.message || 'Periksa email dan password.'));
+                        return;
+                    }
+                    var userEmail = (data && data.user && data.user.email) || email;
+                    saveAuthState(true, userEmail);
+                    window.location.href = 'index.html';
+                } catch (err) {
+                    alert('Login error: ' + (err.message || err));
+                }
+            });
+        });
+    </script>
+</body>
+</html>
