@@ -18,6 +18,17 @@ const ACCOUNT_PROFILES = {
 
 /**
  * ============================================================
+ * KONFIGURASI WAKTU RESET SHIFT
+ * ============================================================
+ * Status checkpoint akan ter-reset pada jam-jam berikut.
+ * Contoh: [7, 20] artinya reset jam 07:00 dan 20:00.
+ * Periode shift 1: 07:00 – 19:59
+ * Periode shift 2: 20:00 – 06:59 (keesokan hari)
+ */
+const RESET_HOURS = [7, 20];
+
+/**
+ * ============================================================
  * KONFIGURASI DEFAULT JIG (fallback jika Supabase kosong)
  * ============================================================
  * Daftar ini hanya dipakai saat pertama kali atau jika
