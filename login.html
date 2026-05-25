@@ -11,7 +11,8 @@
 <body class="bg-slate-100 min-h-screen font-sans flex items-center justify-center px-4">
     <main class="w-full max-w-md">
         <div class="bg-white rounded-3xl shadow-xl border border-slate-200 p-8 space-y-6">
-            <div class="text-center space-y-1">
+            <div class="text-center space-y-3">
+                <img src="QC-Patrol.png" alt="QC Patrol Logo" class="h-20 w-20 object-contain mx-auto rounded-2xl shadow-sm border border-slate-200 bg-white p-1.5">
                 <p class="text-xs font-black text-indigo-500 tracking-[0.3em] uppercase">QC Patrol</p>
                 <h1 class="text-2xl font-black text-slate-800 tracking-tight">Login Patrol QC</h1>
                 <p class="text-xs text-slate-500 font-bold uppercase italic">Masuk untuk scan checkpoint Jig Inspection</p>
@@ -43,8 +44,8 @@
     <script>
         const AUTH_STORAGE_KEY = 'patrol_auth';
         const USERS_STORAGE_KEY = 'patrol_users';
-        const SUPABASE_URL = 'YOUR_SUPABASE_URL';
-        const SUPABASE_KEY = 'YOUR_SUPABASE_ANON_KEY';
+        const SUPABASE_URL = 'https://yxdspxrkvvfbqqbijzfo.supabase.co';
+        const SUPABASE_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Inl4ZHNweHJrdnZmYnFxYmlqemZvIiwicm9sZSI6ImFub24iLCJpYXQiOjE3Nzk1NjY4MTgsImV4cCI6MjA5NTE0MjgxOH0.qOGmQTD28jx_ffYcB23y1C6Y2oYo6xw1P29m-wfSgpw';
         const ADMIN_USERNAME = 'admin@patrol-qc.com';
 
         const _supabase = supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
