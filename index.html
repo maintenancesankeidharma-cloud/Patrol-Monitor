@@ -23,7 +23,7 @@
                 </div>
             </div>
             <div class="flex flex-wrap gap-3 items-center">
-                <button onclick="openSettingsModal()" class="bg-slate-600 hover:bg-slate-700 text-white px-5 py-2.5 rounded-xl font-black text-xs shadow-lg transition-all active:scale-95">
+                <button id="btnSettings" onclick="openSettingsModal()" class="bg-slate-600 hover:bg-slate-700 text-white px-5 py-2.5 rounded-xl font-black text-xs shadow-lg transition-all active:scale-95">
                     PENGATURAN JIG
                 </button>
                 <button onclick="openQRModal()" class="bg-indigo-600 hover:bg-indigo-700 text-white px-5 py-2.5 rounded-xl font-black text-xs shadow-lg transition-all active:scale-95">
@@ -111,7 +111,7 @@
             <div class="overflow-y-auto p-6 flex-1">
                 <div class="mb-6 p-4 rounded-2xl border-2 border-dashed border-indigo-200 bg-indigo-50/50">
                     <p class="text-xs font-black text-indigo-700 uppercase mb-3">Import / Template Excel</p>
-                    <p class="text-[11px] text-slate-600 font-bold mb-3">Kolom: <span class="font-black">Nama Jig / Area</span></p>
+                    <p class="text-[11px] text-slate-600 font-bold mb-3">Kolom: <span class="font-black">Nama Jig</span>, <span class="font-black">Nama Area</span></p>
                     <div class="flex flex-wrap gap-2">
                         <button type="button" onclick="downloadImportTemplate()" class="px-4 py-2 rounded-xl font-black text-xs bg-white border border-indigo-200 text-indigo-700 hover:bg-indigo-100 transition-all">
                             Download Template
@@ -126,7 +126,8 @@
                     <thead>
                         <tr class="border-b border-slate-200">
                             <th class="pb-3 text-xs font-black text-slate-400 uppercase w-12">No</th>
-                            <th class="pb-3 text-xs font-black text-slate-400 uppercase">Nama Jig / Area</th>
+                            <th class="pb-3 text-xs font-black text-slate-400 uppercase">Nama Jig</th>
+                            <th class="pb-3 text-xs font-black text-slate-400 uppercase">Nama Area</th>
                             <th class="pb-3 text-xs font-black text-slate-400 uppercase w-20">Hapus</th>
                         </tr>
                     </thead>
