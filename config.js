@@ -24,12 +24,12 @@ const ACCOUNT_PROFILES = {
  * tabel patrol_config di Supabase belum diisi.
  */
 const CONFIG_AREAS = [
-    { id: 1, name: "Jig Inspection 1" },
-    { id: 2, name: "Jig Inspection 2" },
-    { id: 3, name: "Jig Inspection 3" },
-    { id: 4, name: "Jig Inspection 4" },
-    { id: 5, name: "Jig Inspection 5" },
-    { id: 6, name: "Jig Inspection 6" },
-    { id: 7, name: "Jig Inspection 7" },
-    { id: 8, name: "Jig Inspection 8" }
+    { id: 1, name: "Jig Inspection 1", area: "Area 1" },
+    { id: 2, name: "Jig Inspection 2", area: "Area 1" },
+    { id: 3, name: "Jig Inspection 3", area: "Area 2" },
+    { id: 4, name: "Jig Inspection 4", area: "Area 2" },
+    { id: 5, name: "Jig Inspection 5", area: "Area 3" },
+    { id: 6, name: "Jig Inspection 6", area: "Area 3" },
+    { id: 7, name: "Jig Inspection 7", area: "Area 4" },
+    { id: 8, name: "Jig Inspection 8", area: "Area 4" }
 ];
