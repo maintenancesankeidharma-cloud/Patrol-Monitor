@@ -199,34 +199,46 @@ async function fetchData() {
     }
 }
 
+let _scanLock = false;
+
 async function handleBarcodeScan(areaId, source) {
     source = source || 'manual';
-    const area = areas.find(a => a.id == areaId);
-    if (!area) {
-        alert('Barcode tidak dikenali. Periksa pengaturan area.');
-        return;
-    }
 
-    const nextCp = getNextCheckpoint(area.id);
-    if (!nextCp) {
-        alert(`${area.name} sudah lengkap hari ini (Start, Middle, End).`);
-        return;
-    }
-
-    const payload = {
-        jig_id: area.id,
-        jig_name: area.name,
-        checkpoint: nextCp,
-        operator_name: getOperatorName(),
-        operator_email: getOperatorEmail()
-    };
+    if (_scanLock) return;
+    _scanLock = true;
 
     try {
+        const area = areas.find(a => a.id == areaId);
+        if (!area) {
+            alert('Barcode tidak dikenali. Periksa pengaturan area.');
+            return;
+        }
+
+        const nextCp = getNextCheckpoint(area.id);
+        if (!nextCp) {
+            alert(`${area.name} sudah lengkap hari ini (Start, Middle, End).`);
+            return;
+        }
+
+        const payload = {
+            jig_id: area.id,
+            jig_name: area.name,
+            checkpoint: nextCp,
+            operator_name: getOperatorName(),
+            operator_email: getOperatorEmail()
+        };
+
         const { error } = await _supabase.from('patrol_logs').insert([payload]);
         if (error) {
             alert('Gagal menyimpan scan. Pastikan tabel patrol_logs sudah dibuat di Supabase.\n\n' + (error.message || ''));
             return;
         }
+
+        if (!dailyStatus[area.id]) {
+            dailyStatus[area.id] = { start: null, middle: null, end: null };
+        }
+        dailyStatus[area.id][nextCp] = formatTime(new Date());
+        renderUI();
 
         const label = CHECKPOINT_LABELS[nextCp];
         if (source === 'qr' || source === 'scanner') {
@@ -237,6 +249,8 @@ async function handleBarcodeScan(areaId, source) {
         await fetchData();
     } catch (err) {
         alert('Error: ' + (err.message || err));
+    } finally {
+        _scanLock = false;
     }
 }
 
@@ -349,11 +363,13 @@ function renderUI() {
                 : log.checkpoint === 'middle'
                     ? 'bg-amber-100 text-amber-700'
                     : 'bg-emerald-100 text-emerald-700';
+            const currentArea = areas.find(a => a.id == log.jig_id);
+            const displayJigName = currentArea ? currentArea.name : log.jig_name;
             return `
                 <tr class="hover:bg-slate-50 transition-colors">
                     <td class="p-4 font-mono text-[11px] text-slate-500">${new Date(log.created_at).toLocaleString('id-ID')}</td>
                     <td class="p-4 font-black text-slate-800 text-sm">${escapeHtml(log.operator_name)}</td>
-                    <td class="p-4 text-xs font-bold text-slate-500">${escapeHtml(log.jig_name)}</td>
+                    <td class="p-4 text-xs font-bold text-slate-500">${escapeHtml(displayJigName)}</td>
                     <td class="p-4"><span class="${cpClass} px-3 py-1 rounded-full text-[10px] font-black">${cp}</span></td>
                 </tr>
             `;
