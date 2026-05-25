@@ -201,6 +201,31 @@ async function fetchData() {
 
 let _scanLock = false;
 
+async function getNextCheckpointFromServer(jigId) {
+    try {
+        const { start, end } = getTodayRange();
+        const { data, error } = await _supabase
+            .from('patrol_logs')
+            .select('checkpoint')
+            .eq('jig_id', jigId)
+            .gte('created_at', start)
+            .lte('created_at', end);
+
+        if (error) {
+            console.error('Query checkpoint error:', error.message);
+            return getNextCheckpoint(jigId);
+        }
+
+        const done = new Set((data || []).map(r => r.checkpoint));
+        if (!done.has('start')) return 'start';
+        if (!done.has('middle')) return 'middle';
+        if (!done.has('end')) return 'end';
+        return null;
+    } catch (_) {
+        return getNextCheckpoint(jigId);
+    }
+}
+
 async function handleBarcodeScan(areaId, source) {
     source = source || 'manual';
 
@@ -214,7 +239,7 @@ async function handleBarcodeScan(areaId, source) {
             return;
         }
 
-        const nextCp = getNextCheckpoint(area.id);
+        const nextCp = await getNextCheckpointFromServer(area.id);
         if (!nextCp) {
             alert(`${area.name} sudah lengkap hari ini (Start, Middle, End).`);
             return;
@@ -246,7 +271,7 @@ async function handleBarcodeScan(areaId, source) {
         } else {
             alert(`✓ ${label} tercatat untuk ${area.name}`);
         }
-        await fetchData();
+        fetchData();
     } catch (err) {
         alert('Error: ' + (err.message || err));
     } finally {
