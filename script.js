@@ -996,7 +996,7 @@ function handleLogout() {
     window.location.href = 'login.html';
 }
 
-document.addEventListener('DOMContentLoaded', () => {
+document.addEventListener('DOMContentLoaded', async () => {
     try {
         const auth = getAuthUser();
         if (!auth) {
@@ -1016,7 +1016,7 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     setupBarcodeScanner();
-    fetchData();
+    await fetchData();
     checkAutoScan();
     setInterval(fetchData, 15000);
 
