@@ -6,19 +6,20 @@ const SUPABASE_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZ
 
 const _supabase = supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
 
+const ACCOUNT_PROFILES = {
+    'admin@patrol-qc.com':   { displayName: 'Admin',         shift: null },
+    'shift-a@patrol-qc.com': { displayName: 'Tori Maryono',  shift: 'A' },
+    'shift-b@patrol-qc.com': { displayName: 'M. Iqbal',      shift: 'B' }
+};
+
 const DEFAULT_AREAS = (typeof CONFIG_AREAS !== 'undefined' && CONFIG_AREAS.length)
     ? JSON.parse(JSON.stringify(CONFIG_AREAS))
     : [
-        { id: 1, name: 'Jig Inspection A1', staff: 'PIC SHIFT A', shift: 'A' },
-        { id: 2, name: 'Jig Inspection A2', staff: 'PIC SHIFT A', shift: 'A' },
-        { id: 3, name: 'Jig Inspection B1', staff: 'PIC SHIFT B', shift: 'B' },
-        { id: 4, name: 'Jig Inspection B2', staff: 'PIC SHIFT B', shift: 'B' }
+        { id: 1, name: 'Jig Inspection 1' },
+        { id: 2, name: 'Jig Inspection 2' },
+        { id: 3, name: 'Jig Inspection 3' },
+        { id: 4, name: 'Jig Inspection 4' }
     ];
-
-const SHIFTS = [
-    { key: 'A', label: 'SHIFT A', accent: 'text-violet-700', bg: 'bg-violet-50', border: 'border-violet-200' },
-    { key: 'B', label: 'SHIFT B', accent: 'text-cyan-700', bg: 'bg-cyan-50', border: 'border-cyan-200' }
-];
 
 const CHECKPOINTS = ['start', 'middle', 'end'];
 const CHECKPOINT_LABELS = { start: 'START', middle: 'MIDDLE', end: 'END' };
@@ -42,9 +43,7 @@ function loadAreasFromStorage() {
             if (Array.isArray(parsed) && parsed.length > 0) {
                 return parsed.map((a, i) => ({
                     id: i + 1,
-                    name: a.name || '-',
-                    staff: a.staff || '-',
-                    shift: a.shift === 'B' ? 'B' : 'A'
+                    name: a.name || '-'
                 }));
             }
         }
@@ -71,12 +70,28 @@ function getAuthUser() {
 function getOperatorName() {
     const auth = getAuthUser();
     if (!auth) return 'Operator';
-    return auth.displayName || auth.username || 'Operator';
+    const profile = ACCOUNT_PROFILES[(auth.username || '').toLowerCase()];
+    if (profile) return profile.displayName;
+    return auth.username || 'Operator';
 }
 
 function getOperatorEmail() {
     const auth = getAuthUser();
     return auth ? (auth.username || null) : null;
+}
+
+function getCurrentShift() {
+    const auth = getAuthUser();
+    if (!auth) return null;
+    const profile = ACCOUNT_PROFILES[(auth.username || '').toLowerCase()];
+    return profile ? profile.shift : null;
+}
+
+function getCurrentShiftLabel() {
+    const shift = getCurrentShift();
+    if (shift === 'A') return 'SHIFT A';
+    if (shift === 'B') return 'SHIFT B';
+    return null;
 }
 
 function isCurrentUserAdmin() {
@@ -246,6 +261,7 @@ function renderAreaCard(area) {
     const nextCp = getNextCheckpoint(area.id);
     const complete = !nextCp;
     const progressCount = CHECKPOINTS.filter(cp => status[cp]).length;
+    const picName = getOperatorName();
 
     const card = document.createElement('div');
     card.className = `bg-white p-5 rounded-[2rem] shadow-sm border-2 transition-all duration-300 ${complete ? 'card-complete' : progressCount > 0 ? 'card-partial' : 'card-inactive'}`;
@@ -259,8 +275,8 @@ function renderAreaCard(area) {
             <span class="text-[10px] font-black text-slate-300">#${String(area.id).padStart(2, '0')}</span>
             <span class="text-[10px] font-black px-2 py-0.5 rounded-full ${complete ? 'bg-emerald-100 text-emerald-700' : 'bg-slate-100 text-slate-500'}">${progressCount}/3</span>
         </div>
-        <h3 class="font-black text-slate-800 text-sm leading-tight uppercase">${escapeHtml(area.staff)}</h3>
-        <p class="text-[10px] font-bold text-slate-400 mb-4 italic uppercase">${escapeHtml(area.name)}</p>
+        <h3 class="font-black text-slate-800 text-sm leading-tight uppercase">${escapeHtml(area.name)}</h3>
+        <p class="text-[10px] font-bold text-slate-400 mb-4 italic uppercase">PIC: ${escapeHtml(picName)}</p>
         <div class="space-y-2">
             ${renderCheckpointRow('START', status.start, nextCp === 'start')}
             ${renderCheckpointRow('MIDDLE', status.middle, nextCp === 'middle')}
@@ -280,17 +296,13 @@ function renderUI() {
     if (!grid) return;
     grid.innerHTML = '';
 
-    SHIFTS.forEach(shift => {
-        const shiftAreas = areas.filter(a => a.shift === shift.key);
-        if (!shiftAreas.length) return;
+    areas.forEach(area => grid.appendChild(renderAreaCard(area)));
 
-        const shiftTitle = document.createElement('div');
-        shiftTitle.className = 'col-span-full font-black text-slate-400 text-xs mt-6 mb-1 tracking-[0.2em] uppercase flex items-center gap-2';
-        shiftTitle.innerHTML = `<span class="h-px bg-slate-200 grow"></span> ${shift.label} <span class="h-px bg-slate-200 grow"></span>`;
-        grid.appendChild(shiftTitle);
-
-        shiftAreas.forEach(area => grid.appendChild(renderAreaCard(area)));
-    });
+    const shiftBadge = document.getElementById('shiftBadge');
+    if (shiftBadge) {
+        const sl = getCurrentShiftLabel();
+        shiftBadge.textContent = sl ? `${sl} — ${getOperatorName()}` : 'QC Patrol';
+    }
 
     const dateEl = document.getElementById('currentDate');
     if (dateEl) {
@@ -356,20 +368,18 @@ function openQRModal() {
     const modal = document.getElementById('qrModal');
     const printArea = document.getElementById('qrPrintArea');
     if (!modal || !printArea) return;
-    modal.classList.remove('hidden');
+    modal.style.display = 'flex';
     printArea.innerHTML = '';
 
     const baseUrl = getAppBaseUrl();
     areas.forEach(area => {
         const qrUrl = `${baseUrl}?scan=${area.id}`;
-        const shiftLabel = area.shift === 'B' ? 'SHIFT B' : 'SHIFT A';
         const qrCard = document.createElement('div');
         qrCard.className = 'qr-card-print border-2 border-slate-100 p-4 rounded-3xl flex flex-col items-center text-center bg-white shadow-sm';
         qrCard.innerHTML = `
-            <div class="text-[9px] font-black text-indigo-500 mb-2 uppercase tracking-widest">${shiftLabel}</div>
+            <div class="text-[9px] font-black text-indigo-500 mb-2 uppercase tracking-widest">#${String(area.id).padStart(2, '0')}</div>
             <div class="qr-placeholder w-32 h-32 mb-3 flex items-center justify-center bg-slate-50 rounded-xl"></div>
-            <div class="font-black text-slate-800 text-xs leading-tight mb-1 uppercase">${escapeHtml(area.staff)}</div>
-            <div class="text-[9px] text-slate-500 font-bold italic mb-1">${escapeHtml(area.name)}</div>
+            <div class="font-black text-slate-800 text-xs leading-tight mb-1 uppercase">${escapeHtml(area.name)}</div>
             <div class="text-[9px] text-slate-400 font-bold">Scan 3×: Start → Middle → End</div>
         `;
         printArea.appendChild(qrCard);
@@ -402,26 +412,23 @@ function openQRModal() {
 
 function closeQRModal() {
     const modal = document.getElementById('qrModal');
-    if (modal) modal.classList.add('hidden');
+    if (modal) modal.style.display = 'none';
 }
 
 function openSettingsModal() {
     const tbody = document.getElementById('settingsTableBody');
     if (!tbody) return;
     tbody.innerHTML = '';
-    areas.forEach((a, i) => tbody.appendChild(createSettingsRow(i + 1, a.staff, a.name, a.shift)));
-    document.getElementById('settingsModal').classList.remove('hidden');
+    areas.forEach((a, i) => tbody.appendChild(createSettingsRow(i + 1, a.name)));
+    document.getElementById('settingsModal').style.display = 'flex';
 }
 
-function createSettingsRow(no, staff, name, shift) {
+function createSettingsRow(no, name) {
     const tr = document.createElement('tr');
     tr.className = 'border-b border-slate-100 hover:bg-slate-50';
-    const shiftOpts = ['A', 'B'].map(s => `<option value="${s}" ${shift === s ? 'selected' : ''}>SHIFT ${s}</option>`).join('');
     tr.innerHTML = `
-        <td class="py-3 pr-2 text-sm font-bold text-slate-400">${no}</td>
-        <td class="py-2 pr-2"><input type="text" class="settings-staff w-full px-3 py-2 border border-slate-200 rounded-lg text-sm font-bold" value="${(staff || '').replace(/"/g, '&quot;')}" placeholder="Nama PIC Patrol"></td>
+        <td class="py-3 pr-2 text-sm font-bold text-slate-400 text-center">${no}</td>
         <td class="py-2 pr-2"><input type="text" class="settings-name w-full px-3 py-2 border border-slate-200 rounded-lg text-sm font-bold" value="${(name || '').replace(/"/g, '&quot;')}" placeholder="Nama Jig / Area"></td>
-        <td class="py-2 pr-2"><select class="settings-shift w-full px-3 py-2 border border-slate-200 rounded-lg text-sm font-bold">${shiftOpts}</select></td>
         <td class="py-2"><button type="button" onclick="this.closest('tr').remove()" class="text-red-500 hover:text-red-700 text-lg font-black leading-none" title="Hapus">&times;</button></td>
     `;
     return tr;
@@ -430,23 +437,16 @@ function createSettingsRow(no, staff, name, shift) {
 function addSettingsRow() {
     const tbody = document.getElementById('settingsTableBody');
     const nextNo = tbody.querySelectorAll('tr').length + 1;
-    tbody.appendChild(createSettingsRow(nextNo, '', '', 'A'));
+    tbody.appendChild(createSettingsRow(nextNo, ''));
 }
 
 function saveSettings() {
     const rows = document.querySelectorAll('#settingsTableBody tr');
     const newAreas = [];
     rows.forEach((row, i) => {
-        const staff = (row.querySelector('.settings-staff') || {}).value || '';
         const name = (row.querySelector('.settings-name') || {}).value || '';
-        const shift = (row.querySelector('.settings-shift') || {}).value || 'A';
-        if (staff.trim() || name.trim()) {
-            newAreas.push({
-                id: i + 1,
-                staff: staff.trim() || '-',
-                name: name.trim() || '-',
-                shift: shift === 'B' ? 'B' : 'A'
-            });
+        if (name.trim()) {
+            newAreas.push({ id: i + 1, name: name.trim() });
         }
     });
     if (!newAreas.length) {
@@ -468,7 +468,7 @@ function resetSettingsToDefault() {
 }
 
 function closeSettingsModal() {
-    document.getElementById('settingsModal').classList.add('hidden');
+    document.getElementById('settingsModal').style.display = 'none';
 }
 
 function checkAutoScan() {
@@ -562,36 +562,23 @@ function formatDateTimeExport(iso) {
     });
 }
 
-function normalizeShiftValue(val) {
-    const s = String(val || '').trim().toUpperCase();
-    if (s === 'B' || s === 'SHIFT B' || s === 'SHIF B' || s === '2') return 'B';
-    return 'A';
-}
-
 function parseImportHeaderIndex(headers) {
-    const idx = { staff: -1, name: -1, shift: -1 };
+    const idx = { name: -1 };
     headers.forEach((h, i) => {
         const key = String(h || '').trim().toLowerCase();
         if (/^(no|id|#)$/.test(key)) return;
-        if (/pic|staff|petugas|nama\s*pic|patrol/.test(key)) idx.staff = i;
-        else if (/jig|area|zona|lokasi|nama\s*jig/.test(key)) idx.name = i;
-        else if (/shift/.test(key)) idx.shift = i;
+        if (/jig|area|zona|lokasi|nama/.test(key)) idx.name = i;
     });
-    if (idx.staff < 0 && idx.name < 0 && idx.shift < 0 && headers.length >= 3) {
-        return { staff: 0, name: 1, shift: 2 };
-    }
-    if (idx.staff < 0 && headers.length >= 2) idx.staff = 0;
-    if (idx.name < 0 && headers.length >= 2) idx.name = idx.staff === 0 ? 1 : 0;
-    if (idx.shift < 0 && headers.length >= 3) idx.shift = 2;
+    if (idx.name < 0) idx.name = 0;
     return idx;
 }
 
 function rowsToAreas(matrix) {
     if (!matrix || !matrix.length) return [];
     const firstRow = matrix[0].map(c => String(c == null ? '' : c).trim());
-    const looksLikeHeader = firstRow.some(c => /pic|jig|area|shift|patrol/i.test(c));
+    const looksLikeHeader = firstRow.some(c => /jig|area|zona|lokasi|nama/i.test(c));
     let dataRows = matrix;
-    let colIdx = { staff: 0, name: 1, shift: 2 };
+    let colIdx = { name: 0 };
 
     if (looksLikeHeader) {
         colIdx = parseImportHeaderIndex(firstRow);
@@ -601,15 +588,9 @@ function rowsToAreas(matrix) {
     const result = [];
     dataRows.forEach(row => {
         if (!row || !row.length) return;
-        const staff = String(row[colIdx.staff] == null ? '' : row[colIdx.staff]).trim();
         const name = String(row[colIdx.name] == null ? '' : row[colIdx.name]).trim();
-        const shift = normalizeShiftValue(row[colIdx.shift]);
-        if (!staff && !name) return;
-        result.push({
-            staff: staff || '-',
-            name: name || '-',
-            shift
-        });
+        if (!name) return;
+        result.push({ name });
     });
     return result;
 }
@@ -629,14 +610,14 @@ function downloadImportTemplate() {
         return;
     }
     const wsData = [
-        ['PIC Patrol', 'Nama Jig / Area', 'Shift (A/B)'],
-        ['RIZKY MAULANA', 'Jig Inspection A1', 'A'],
-        ['DEDI KURNIAWAN', 'Jig Inspection A2', 'A'],
-        ['FIRMANSYAH', 'Jig Inspection B1', 'B']
+        ['Nama Jig / Area'],
+        ['Jig Inspection 1'],
+        ['Jig Inspection 2'],
+        ['Jig Inspection 3']
     ];
     const wb = XLSX.utils.book_new();
     const ws = XLSX.utils.aoa_to_sheet(wsData);
-    ws['!cols'] = [{ wch: 22 }, { wch: 28 }, { wch: 12 }];
+    ws['!cols'] = [{ wch: 30 }];
     XLSX.utils.book_append_sheet(wb, ws, 'Daftar Jig');
     XLSX.writeFile(wb, 'Template_Import_Jig_Patrol_QC.xlsx');
 }
@@ -662,7 +643,7 @@ function handleExcelImport(inputEl) {
             const imported = rowsToAreas(matrix);
 
             if (!imported.length) {
-                alert('Tidak ada data valid. Pastikan kolom: PIC Patrol, Nama Jig / Area, Shift (A/B).');
+                alert('Tidak ada data valid. Pastikan kolom: Nama Jig / Area.');
                 return;
             }
 
@@ -694,12 +675,12 @@ function openExportModal() {
     const dateInput = document.getElementById('exportDate');
     if (!modal) return;
     if (dateInput) dateInput.value = formatDateInputValue(new Date());
-    modal.classList.remove('hidden');
+    modal.style.display = 'flex';
 }
 
 function closeExportModal() {
     const modal = document.getElementById('exportModal');
-    if (modal) modal.classList.add('hidden');
+    if (modal) modal.style.display = 'none';
 }
 
 async function fetchLogsForDate(dateStr) {
@@ -735,13 +716,15 @@ function buildCheckpointRows(logs, dateLabel) {
     });
 
     const rows = [];
+    const shiftLabel = getCurrentShiftLabel() || '-';
+    const picName = getOperatorName();
     areas.forEach(area => {
         const rec = byJig[area.id] || { start: null, middle: null, end: null, operators: {} };
         const complete = rec.start && rec.middle && rec.end;
         rows.push({
             tanggal: dateLabel,
-            shift: area.shift === 'B' ? 'SHIFT B' : 'SHIFT A',
-            pic: area.staff,
+            shift: shiftLabel,
+            pic: picName,
             jig: area.name,
             start: formatDateTimeExport(rec.start),
             middle: formatDateTimeExport(rec.middle),
@@ -833,13 +816,14 @@ async function exportDetailLog() {
     const header = ['Tanggal', 'Waktu Scan', 'Shift', 'PIC Patrol', 'Nama Jig / Area', 'Checkpoint', 'Operator QC', 'Email Operator'];
     let csv = csvRow(header);
 
+    const detailShift = getCurrentShiftLabel() || '-';
+    const detailPic = getOperatorName();
     logs.forEach(log => {
-        const area = areas.find(a => a.id == log.jig_id);
         csv += csvRow([
             label,
             formatDateTimeExport(log.created_at),
-            area ? (area.shift === 'B' ? 'SHIFT B' : 'SHIFT A') : '-',
-            area ? area.staff : '-',
+            detailShift,
+            detailPic,
             log.jig_name,
             CHECKPOINT_LABELS[log.checkpoint] || log.checkpoint,
             log.operator_name,
@@ -850,12 +834,11 @@ async function exportDetailLog() {
     if (typeof XLSX !== 'undefined') {
         const aoa = [header];
         logs.forEach(log => {
-            const area = areas.find(a => a.id == log.jig_id);
             aoa.push([
                 label,
                 formatDateTimeExport(log.created_at),
-                area ? (area.shift === 'B' ? 'SHIFT B' : 'SHIFT A') : '-',
-                area ? area.staff : '-',
+                detailShift,
+                detailPic,
                 log.jig_name,
                 CHECKPOINT_LABELS[log.checkpoint] || log.checkpoint,
                 log.operator_name,
@@ -898,11 +881,11 @@ function openAccountsModal() {
     renderAccountsTable();
     document.getElementById('newAccountUser').value = '';
     document.getElementById('newAccountPass').value = '';
-    document.getElementById('accountsModal').classList.remove('hidden');
+    document.getElementById('accountsModal').style.display = 'flex';
 }
 
 function closeAccountsModal() {
-    document.getElementById('accountsModal').classList.add('hidden');
+    document.getElementById('accountsModal').style.display = 'none';
 }
 
 function renderAccountsTable() {
@@ -964,9 +947,10 @@ document.addEventListener('DOMContentLoaded', () => {
         }
         const loginEl = document.getElementById('loginAsIndicator');
         if (loginEl) {
-            loginEl.textContent = auth.username === ADMIN_USERNAME
-                ? 'Login sebagai: Admin'
-                : 'Login sebagai: ' + (auth.username || '—');
+            const profile = ACCOUNT_PROFILES[(auth.username || '').toLowerCase()];
+            const displayName = profile ? profile.displayName : (auth.username || '—');
+            const shiftInfo = profile && profile.shift ? ` — SHIFT ${profile.shift}` : '';
+            loginEl.textContent = `Login: ${displayName}${shiftInfo}`;
         }
     } catch (_) {
         window.location.href = 'login.html';
