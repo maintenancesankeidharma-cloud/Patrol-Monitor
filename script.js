@@ -126,6 +126,20 @@ function escapeHtml(s) {
     return div.innerHTML;
 }
 
+function resolveOperatorName(nameOrEmail) {
+    if (!nameOrEmail) return 'Operator';
+    const key = nameOrEmail.toLowerCase();
+    const profile = ACCOUNT_PROFILES[key];
+    if (profile) return profile.displayName;
+    if (key.includes('@')) {
+        for (const email in ACCOUNT_PROFILES) {
+            if (ACCOUNT_PROFILES[email].displayName.toLowerCase() === key) return ACCOUNT_PROFILES[email].displayName;
+        }
+        return nameOrEmail.split('@')[0].toUpperCase();
+    }
+    return nameOrEmail;
+}
+
 function formatTime(isoOrDate) {
     if (!isoOrDate) return null;
     return new Date(isoOrDate).toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit' });
@@ -531,7 +545,7 @@ function renderUI() {
             return `
                 <tr class="hover:bg-slate-50 transition-colors">
                     <td class="p-4 font-mono text-[11px] text-slate-500">${new Date(log.created_at).toLocaleString('id-ID')}</td>
-                    <td class="p-4 font-black text-slate-800 text-sm">${escapeHtml(log.operator_name)}</td>
+                    <td class="p-4 font-black text-slate-800 text-sm">${escapeHtml(resolveOperatorName(log.operator_name || log.operator_email))}</td>
                     <td class="p-4 text-xs font-bold text-slate-500">${escapeHtml(displayJigName)}</td>
                     <td class="p-4"><span class="${cpClass} px-3 py-1 rounded-full text-[10px] font-black">${cp}</span></td>
                 </tr>
