@@ -8,12 +8,13 @@
  */
 const ACCOUNT_PROFILES = {
     'admin@patrol-qc.com':    { displayName: 'Admin',           shift: null },
-    'leader-a@patrol-qc.com': { displayName: 'Leader A',        shift: 'A' },
-    'leader-b@patrol-qc.com': { displayName: 'Leader B',        shift: 'B' },
-    'pic1@patrol-qc.com':     { displayName: 'PIC 1',           shift: 'A' },
-    'pic2@patrol-qc.com':     { displayName: 'PIC 2',           shift: 'A' },
-    'pic3@patrol-qc.com':     { displayName: 'PIC 3',           shift: 'B' },
-    'pic4@patrol-qc.com':     { displayName: 'PIC 4',           shift: 'B' }
+    'leader-a@patrol-qc.com': { displayName: 'Tulus Imam. R',   shift: 'A' },
+    'leader-b@patrol-qc.com': { displayName: 'Okto Berliando',  shift: 'B' },
+    'pic1@patrol-qc.com':     { displayName: 'Yayang Zigo',     shift: 'A' },
+    'pic2@patrol-qc.com':     { displayName: 'Endang Tegar',    shift: 'A' },
+    'pic3@patrol-qc.com':     { displayName: 'Torry Maryono',   shift: 'B' },
+    'pic4@patrol-qc.com':     { displayName: 'Muhammad Iqbal',  shift: 'B' },
+    'pic5@patrol-qc.com':     { displayName: 'Ahmad Akbar',     shift: 'B' }
 };
 
 /**
