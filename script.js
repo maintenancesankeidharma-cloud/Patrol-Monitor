@@ -1252,7 +1252,7 @@ function connectMQTT() {
             if (areaName) {
                 areaProducts[areaName] = product;
                 renderUI();
-                updateProductBannerFromAreas();
+                updateProductUI();
             }
         });
 
