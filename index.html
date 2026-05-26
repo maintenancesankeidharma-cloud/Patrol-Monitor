@@ -8,6 +8,7 @@
     <script src="https://unpkg.com/@supabase/supabase-js@2"></script>
     <script src="https://cdn.jsdelivr.net/npm/qrcodejs@1.0.0/qrcode.min.js"></script>
     <script src="https://cdn.sheetjs.com/xlsx-0.20.1/package/dist/xlsx.full.min.js"></script>
+    <script src="https://unpkg.com/mqtt/dist/mqtt.min.js"></script>
     <link rel="stylesheet" href="style.css">
 </head>
 <body class="bg-slate-100 min-h-screen font-sans">
@@ -57,7 +58,26 @@
             </div>
         </div>
 
-        <div id="jigGrid" class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6">
+        <div id="productRunningBanner" class="mb-8 bg-gradient-to-r from-violet-600 to-indigo-600 p-5 rounded-3xl shadow-lg border border-indigo-500/30 text-white">
+            <div class="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3">
+                <div class="flex items-center gap-4">
+                    <div class="w-12 h-12 bg-white/20 rounded-2xl flex items-center justify-center backdrop-blur-sm">
+                        <svg class="w-6 h-6 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19.428 15.428a2 2 0 00-1.022-.547l-2.387-.477a6 6 0 00-3.86.517l-.318.158a6 6 0 01-3.86.517L6.05 15.21a2 2 0 00-1.806.547M8 4h8l-1 1v5.172a2 2 0 00.586 1.414l5 5c1.26 1.26.367 3.414-1.415 3.414H4.828c-1.782 0-2.674-2.154-1.414-3.414l5-5A2 2 0 009 10.172V5L8 4z"/></svg>
+                    </div>
+                    <div>
+                        <p class="text-white/70 text-[10px] font-black uppercase tracking-widest">Product Running Hari Ini</p>
+                        <h3 id="productRunningName" class="text-xl font-black tracking-tight leading-tight">Mendeteksi...</h3>
+                        <p id="productRunningSource" class="text-white/60 text-[10px] font-bold mt-0.5 italic"></p>
+                    </div>
+                </div>
+                <div class="flex items-center gap-2">
+                    <span id="mqttStatusDot" class="w-2.5 h-2.5 rounded-full bg-amber-400 animate-pulse"></span>
+                    <span id="mqttStatusText" class="text-[10px] font-black text-white/70 uppercase">Menghubungkan...</span>
+                </div>
+            </div>
+        </div>
+
+        <div id="jigGrid" class="space-y-8">
         </div>
 
         <div class="mt-12 bg-white rounded-3xl shadow-sm border overflow-hidden">
