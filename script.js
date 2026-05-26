@@ -26,6 +26,11 @@ const ADMIN_USERNAME = 'admin@patrol-qc.com';
 let areas = JSON.parse(JSON.stringify(DEFAULT_AREAS));
 let dailyStatus = {};
 let recentHistory = [];
+let currentProduct = null;
+let productSource = null;
+let mqttClient = null;
+let mqttConnected = false;
+let areaProducts = {};
 
 async function loadAreasFromSupabase() {
     try {
@@ -212,6 +217,7 @@ async function fetchData() {
         dailyStatus = buildDailyStatusFromLogs(logsToday);
         recentHistory = allLogs || [];
         renderUI();
+        detectProductFromScans();
     } catch (e) {
         console.error('Koneksi Error:', e);
     }
@@ -336,23 +342,47 @@ function renderCheckpointRow(label, time, isNext) {
     `;
 }
 
+function extractProductCode(str) {
+    return (str || '').replace(/[^a-zA-Z0-9\-]/g, '').substring(0, 12).toLowerCase();
+}
+
+function isJigRunning(area) {
+    const runningProduct = areaProducts[area.area];
+    if (!runningProduct) return false;
+    const mqttCode = extractProductCode(runningProduct);
+    const jigCode = extractProductCode(area.name);
+    return mqttCode.length >= 12 && jigCode.length >= 12 && mqttCode === jigCode;
+}
+
 function renderAreaCard(area) {
     const status = dailyStatus[area.id] || { start: null, middle: null, end: null };
     const nextCp = getNextCheckpoint(area.id);
     const complete = !nextCp;
     const progressCount = CHECKPOINTS.filter(cp => status[cp]).length;
     const picName = getOperatorName();
+    const running = isJigRunning(area);
 
     const card = document.createElement('div');
-    card.className = `bg-white p-5 rounded-[2rem] shadow-sm border-2 transition-all duration-300 ${complete ? 'card-complete' : progressCount > 0 ? 'card-partial' : 'card-inactive'}`;
+    let cardClass = 'card-inactive';
+    if (running) cardClass = 'card-running';
+    else if (complete) cardClass = 'card-complete';
+    else if (progressCount > 0) cardClass = 'card-partial';
+    card.className = `bg-white p-5 rounded-[2rem] shadow-sm border-2 transition-all duration-300 ${cardClass}`;
 
     const adminReset = isCurrentUserAdmin()
         ? `<button type="button" onclick="resetAreaToday(${area.id})" class="mt-3 w-full text-[9px] text-slate-400 hover:text-red-500 font-bold underline">Reset hari ini (admin)</button>`
         : '';
 
+    const isActive = progressCount > 0 && !complete;
+
     card.innerHTML = `
         <div class="flex justify-between items-start mb-2">
-            <span class="text-[10px] font-black text-slate-300">#${String(area.id).padStart(2, '0')}</span>
+            <div class="flex items-center gap-1.5">
+                <span class="text-[10px] font-black text-slate-300">#${String(area.id).padStart(2, '0')}</span>
+                ${running ? '<span class="flex items-center gap-1 bg-violet-600 text-white px-2 py-0.5 rounded-full text-[9px] font-black uppercase"><span style="animation:pulse-dot 1.5s ease-in-out infinite" class="inline-block w-1.5 h-1.5 bg-white rounded-full"></span>Running</span>' : ''}
+                ${!running && isActive ? '<span class="flex items-center gap-1 bg-amber-500 text-white px-2 py-0.5 rounded-full text-[9px] font-black uppercase"><span style="animation:pulse-dot 1.5s ease-in-out infinite" class="inline-block w-1.5 h-1.5 bg-white rounded-full"></span>Active</span>' : ''}
+                ${complete ? '<span class="flex items-center gap-1 bg-emerald-500 text-white px-2 py-0.5 rounded-full text-[9px] font-black uppercase">Done</span>' : ''}
+            </div>
             <span class="text-[10px] font-black px-2 py-0.5 rounded-full ${complete ? 'bg-emerald-100 text-emerald-700' : 'bg-slate-100 text-slate-500'}">${progressCount}/3</span>
         </div>
         <h3 class="font-black text-slate-800 text-sm leading-tight uppercase">${escapeHtml(area.name)}</h3>
@@ -377,7 +407,68 @@ function renderUI() {
     if (!grid) return;
     grid.innerHTML = '';
 
-    areas.forEach(area => grid.appendChild(renderAreaCard(area)));
+    const grouped = {};
+    const groupOrder = [];
+    areas.forEach(area => {
+        const key = area.area || 'Tanpa Area';
+        if (!grouped[key]) {
+            grouped[key] = [];
+            groupOrder.push(key);
+        }
+        grouped[key].push(area);
+    });
+
+    groupOrder.forEach(areaName => {
+        const groupAreas = grouped[areaName];
+        const completedInGroup = groupAreas.filter(a => {
+            const s = dailyStatus[a.id];
+            return s && s.start && s.middle && s.end;
+        }).length;
+        const totalInGroup = groupAreas.length;
+        const allComplete = completedInGroup === totalInGroup;
+        const hasProgress = completedInGroup > 0;
+
+        const section = document.createElement('div');
+
+        const statusColor = allComplete
+            ? 'bg-emerald-100 text-emerald-700'
+            : hasProgress
+                ? 'bg-amber-100 text-amber-700'
+                : 'bg-red-100 text-red-700';
+
+        const borderColor = allComplete
+            ? 'border-emerald-200'
+            : hasProgress
+                ? 'border-amber-200'
+                : 'border-red-200';
+
+        const runningProduct = areaProducts[areaName] || null;
+
+        section.innerHTML = `
+            <div class="flex flex-col sm:flex-row sm:items-center justify-between mb-4 px-1 gap-2">
+                <div class="flex items-center gap-3">
+                    <div class="w-1.5 h-8 rounded-full ${allComplete ? 'bg-emerald-500' : hasProgress ? 'bg-amber-500' : 'bg-red-400'}"></div>
+                    <div>
+                        <h3 class="text-lg font-black text-slate-800 uppercase tracking-wide">${escapeHtml(areaName)}</h3>
+                        ${runningProduct
+                            ? `<div class="flex items-center gap-1.5 mt-0.5">
+                                    <span class="w-2 h-2 bg-violet-500 rounded-full animate-pulse"></span>
+                                    <span class="text-xs font-black text-violet-600">${escapeHtml(runningProduct)}</span>
+                                </div>`
+                            : ''}
+                    </div>
+                </div>
+                <span class="${statusColor} px-3 py-1 rounded-full text-[11px] font-black border ${borderColor}">${completedInGroup}/${totalInGroup} Lengkap</span>
+            </div>
+        `;
+
+        const cardGrid = document.createElement('div');
+        cardGrid.className = 'grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6';
+        groupAreas.forEach(area => cardGrid.appendChild(renderAreaCard(area)));
+        section.appendChild(cardGrid);
+
+        grid.appendChild(section);
+    });
 
     const shiftBadge = document.getElementById('shiftBadge');
     if (shiftBadge) {
@@ -1035,8 +1126,175 @@ function handleLogout() {
     try {
         localStorage.removeItem(AUTH_STORAGE_KEY);
         _supabase.auth.signOut();
+        if (mqttClient) mqttClient.end();
     } catch (_) {}
     window.location.href = 'login.html';
+}
+
+// ============================================================
+// MQTT — Product Running Detection (Metode 1)
+// ============================================================
+function updateProductUI() {
+    const nameEl = document.getElementById('productRunningName');
+    const sourceEl = document.getElementById('productRunningSource');
+    const dotEl = document.getElementById('mqttStatusDot');
+    const statusEl = document.getElementById('mqttStatusText');
+
+    if (nameEl) {
+        nameEl.textContent = currentProduct || 'Belum terdeteksi';
+    }
+    if (sourceEl) {
+        const activeJigs = Object.keys(areaProducts).length;
+        let sourceText = '';
+        if (productSource === 'mqtt') {
+            sourceText = 'Sumber: MQTT (real-time)';
+        } else if (productSource === 'barcode') {
+            sourceText = 'Sumber: Deteksi barcode hari ini';
+        }
+        if (activeJigs > 0) {
+            sourceText += (sourceText ? ' · ' : '') + activeJigs + ' area aktif';
+        }
+        sourceEl.textContent = sourceText;
+    }
+    if (dotEl && statusEl) {
+        if (mqttConnected) {
+            dotEl.className = 'w-2.5 h-2.5 rounded-full bg-emerald-400';
+            statusEl.textContent = 'MQTT Terhubung';
+        } else {
+            dotEl.className = 'w-2.5 h-2.5 rounded-full bg-amber-400 animate-pulse';
+            statusEl.textContent = 'MQTT Terputus';
+        }
+    }
+}
+
+function getTopicToAreaMap() {
+    if (typeof MQTT_TOPIC_MAP === 'undefined' || !Array.isArray(MQTT_TOPIC_MAP)) return {};
+    const map = {};
+    MQTT_TOPIC_MAP.forEach(entry => { map[entry.topic] = entry.area; });
+    return map;
+}
+
+function parseProductPayload(message) {
+    const raw = message.toString().trim();
+    if (!raw) return null;
+    try {
+        const json = JSON.parse(raw);
+        return json.product || json.model || json.name || raw;
+    } catch (_) {
+        return raw;
+    }
+}
+
+function connectMQTT() {
+    if (typeof mqtt === 'undefined' || typeof MQTT_CONFIG === 'undefined') {
+        console.warn('MQTT library atau config belum tersedia.');
+        return;
+    }
+
+    const topicToArea = getTopicToAreaMap();
+    const perAreaTopics = Object.keys(topicToArea);
+
+    try {
+        mqttClient = mqtt.connect(MQTT_CONFIG.broker, {
+            username: MQTT_CONFIG.username,
+            password: MQTT_CONFIG.password,
+            reconnectPeriod: MQTT_CONFIG.reconnectPeriod || 5000,
+            connectTimeout: MQTT_CONFIG.connectTimeout || 10000,
+            rejectUnauthorized: false
+        });
+
+        mqttClient.on('connect', function () {
+            console.log('MQTT terhubung ke EMQX Cloud');
+            mqttConnected = true;
+
+            const allTopics = [MQTT_CONFIG.topic, ...perAreaTopics];
+            allTopics.forEach(function (t) {
+                mqttClient.subscribe(t, { qos: 1 }, function (err) {
+                    if (err) console.error('Subscribe error:', t, err);
+                    else console.log('Subscribed:', t);
+                });
+            });
+
+            updateProductUI();
+        });
+
+        mqttClient.on('message', function (topic, message) {
+            const product = parseProductPayload(message);
+            if (!product) return;
+
+            if (topic === MQTT_CONFIG.topic) {
+                currentProduct = product;
+                productSource = 'mqtt';
+                updateProductUI();
+                return;
+            }
+
+            const areaName = topicToArea[topic];
+            if (areaName) {
+                areaProducts[areaName] = product;
+                renderUI();
+                updateProductBannerFromAreas();
+            }
+        });
+
+        mqttClient.on('error', function (err) {
+            console.error('MQTT error:', err.message);
+            mqttConnected = false;
+            updateProductUI();
+        });
+
+        mqttClient.on('close', function () {
+            mqttConnected = false;
+            updateProductUI();
+        });
+
+        mqttClient.on('reconnect', function () {
+            console.log('MQTT reconnecting...');
+        });
+    } catch (e) {
+        console.error('MQTT connect failed:', e);
+    }
+}
+
+function updateProductBannerFromAreas() {
+    if (productSource === 'mqtt' && currentProduct) return;
+
+    const products = Object.values(areaProducts).filter(Boolean);
+    const unique = [...new Set(products)];
+    if (unique.length > 0) {
+        currentProduct = unique.join(' / ');
+        productSource = 'mqtt';
+        updateProductUI();
+    }
+}
+
+// ============================================================
+// Barcode-based Product Detection (Metode 2 — fallback)
+// ============================================================
+async function detectProductFromScans() {
+    if (productSource === 'mqtt' && currentProduct) return;
+
+    try {
+        const { start, end } = getTodayRange();
+        const { data } = await _supabase
+            .from('patrol_logs')
+            .select('jig_name, jig_id')
+            .gte('created_at', start)
+            .lte('created_at', end)
+            .order('created_at', { ascending: false })
+            .limit(1);
+
+        if (data && data.length > 0) {
+            const scannedArea = areas.find(a => a.id == data[0].jig_id);
+            if (scannedArea && scannedArea.area) {
+                if (productSource !== 'mqtt') {
+                    currentProduct = scannedArea.area + ' — ' + scannedArea.name;
+                    productSource = 'barcode';
+                    updateProductUI();
+                }
+            }
+        }
+    } catch (_) {}
 }
 
 document.addEventListener('DOMContentLoaded', async () => {
@@ -1059,7 +1317,10 @@ document.addEventListener('DOMContentLoaded', async () => {
     }
 
     setupBarcodeScanner();
+    connectMQTT();
     await fetchData();
+    await detectProductFromScans();
+    updateProductUI();
     checkAutoScan();
     setInterval(fetchData, 15000);
 
