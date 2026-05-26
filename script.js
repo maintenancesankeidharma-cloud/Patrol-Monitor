@@ -342,16 +342,17 @@ function renderCheckpointRow(label, time, isNext) {
     `;
 }
 
-function extractProductCode(str) {
-    return (str || '').replace(/[^a-zA-Z0-9\-]/g, '').substring(0, 12).toLowerCase();
-}
-
 function isJigRunning(area) {
     const runningProduct = areaProducts[area.area];
-    if (!runningProduct) return false;
-    const mqttCode = extractProductCode(runningProduct);
-    const jigCode = extractProductCode(area.name);
-    return mqttCode.length >= 12 && jigCode.length >= 12 && mqttCode === jigCode;
+    if (!runningProduct || !area.name) return false;
+    const payload = runningProduct.toLowerCase();
+    const jigName = area.name.toLowerCase();
+    return payload.startsWith(jigName) || jigName.startsWith(payload);
+}
+
+function getRunningModel(area) {
+    if (!isJigRunning(area)) return null;
+    return areaProducts[area.area];
 }
 
 function renderAreaCard(area) {
@@ -361,6 +362,7 @@ function renderAreaCard(area) {
     const progressCount = CHECKPOINTS.filter(cp => status[cp]).length;
     const picName = getOperatorName();
     const running = isJigRunning(area);
+    const runningModel = getRunningModel(area);
 
     const card = document.createElement('div');
     let cardClass = 'card-inactive';
@@ -387,6 +389,7 @@ function renderAreaCard(area) {
         </div>
         <h3 class="font-black text-slate-800 text-sm leading-tight uppercase">${escapeHtml(area.name)}</h3>
         ${area.area ? `<p class="text-[10px] font-bold text-indigo-500 mb-1 uppercase">${escapeHtml(area.area)}</p>` : ''}
+        ${runningModel ? `<div class="flex items-center gap-1.5 mb-1"><span class="w-1.5 h-1.5 bg-violet-500 rounded-full animate-pulse"></span><span class="text-[10px] font-black text-violet-600 truncate">Model: ${escapeHtml(runningModel)}</span></div>` : ''}
         <p class="text-[10px] font-bold text-slate-400 mb-4 italic uppercase">PIC: ${escapeHtml(picName)}</p>
         <div class="space-y-2">
             ${renderCheckpointRow('START', status.start, nextCp === 'start')}
@@ -1135,27 +1138,18 @@ function handleLogout() {
 // MQTT — Product Running Detection (Metode 1)
 // ============================================================
 function updateProductUI() {
-    const nameEl = document.getElementById('productRunningName');
     const sourceEl = document.getElementById('productRunningSource');
     const dotEl = document.getElementById('mqttStatusDot');
     const statusEl = document.getElementById('mqttStatusText');
+    const listEl = document.getElementById('productRunningList');
 
-    if (nameEl) {
-        nameEl.textContent = currentProduct || 'Belum terdeteksi';
-    }
     if (sourceEl) {
-        const activeJigs = Object.keys(areaProducts).length;
-        let sourceText = '';
-        if (productSource === 'mqtt') {
-            sourceText = 'Sumber: MQTT (real-time)';
-        } else if (productSource === 'barcode') {
-            sourceText = 'Sumber: Deteksi barcode hari ini';
-        }
-        if (activeJigs > 0) {
-            sourceText += (sourceText ? ' · ' : '') + activeJigs + ' area aktif';
-        }
-        sourceEl.textContent = sourceText;
+        const activeCount = Object.keys(areaProducts).length;
+        sourceEl.textContent = activeCount > 0
+            ? activeCount + ' line aktif · MQTT real-time'
+            : mqttConnected ? 'Terhubung · Menunggu data...' : '';
     }
+
     if (dotEl && statusEl) {
         if (mqttConnected) {
             dotEl.className = 'w-2.5 h-2.5 rounded-full bg-emerald-400';
@@ -1164,6 +1158,31 @@ function updateProductUI() {
             dotEl.className = 'w-2.5 h-2.5 rounded-full bg-amber-400 animate-pulse';
             statusEl.textContent = 'MQTT Terputus';
         }
+    }
+
+    if (listEl) {
+        const topicMap = (typeof MQTT_TOPIC_MAP !== 'undefined' && Array.isArray(MQTT_TOPIC_MAP)) ? MQTT_TOPIC_MAP : [];
+        if (topicMap.length === 0) {
+            listEl.innerHTML = '<div class="bg-white/10 rounded-xl px-4 py-2.5 text-center text-white/50 text-[11px] font-bold italic col-span-full">Tidak ada konfigurasi area MQTT</div>';
+            return;
+        }
+
+        listEl.innerHTML = topicMap.map(entry => {
+            const product = areaProducts[entry.area] || null;
+            return `
+                <div class="bg-white/10 backdrop-blur-sm rounded-xl px-4 py-3 flex items-center gap-3">
+                    <div class="flex-shrink-0">
+                        ${product
+                            ? '<span class="w-2.5 h-2.5 rounded-full bg-emerald-400 inline-block" style="animation:pulse-dot 1.5s ease-in-out infinite"></span>'
+                            : '<span class="w-2.5 h-2.5 rounded-full bg-white/20 inline-block"></span>'}
+                    </div>
+                    <div class="min-w-0 flex-1">
+                        <p class="text-[10px] font-black text-white/60 uppercase tracking-wider">${escapeHtml(entry.area)}</p>
+                        <p class="text-sm font-black text-white truncate">${product ? escapeHtml(product) : '<span class="text-white/30 italic text-[11px]">— Standby</span>'}</p>
+                    </div>
+                </div>
+            `;
+        }).join('');
     }
 }
 
