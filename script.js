@@ -1178,7 +1178,7 @@ function updateProductUI() {
                     </div>
                     <div class="min-w-0 flex-1">
                         <p class="text-[10px] font-black text-white/60 uppercase tracking-wider">${escapeHtml(entry.area)}</p>
-                        <p class="text-sm font-black text-white truncate">${product ? escapeHtml(product) : '<span class="text-white/30 italic text-[11px]">— Standby</span>'}</p>
+                        <p class="text-sm font-black text-white truncate">${product ? escapeHtml(product) : '<span class="text-white/30 italic text-[11px]">Menunggu data...</span>'}</p>
                     </div>
                 </div>
             `;
