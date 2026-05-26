@@ -31,6 +31,7 @@ let productSource = null;
 let mqttClient = null;
 let mqttConnected = false;
 let areaProducts = {};
+let hideInactive = false;
 
 async function loadAreasFromSupabase() {
     try {
@@ -405,6 +406,20 @@ function renderAreaCard(area) {
     return card;
 }
 
+function isCardActive(area) {
+    const status = dailyStatus[area.id] || {};
+    return !!status.start || isJigRunning(area);
+}
+
+function toggleInactiveCards() {
+    hideInactive = !hideInactive;
+    const label = document.getElementById('toggleLabel');
+    const icon = document.getElementById('toggleIcon');
+    if (label) label.textContent = hideInactive ? 'Tampilkan Semua' : 'Sembunyikan Tidak Aktif';
+    if (icon) icon.textContent = hideInactive ? '👁‍🗨' : '👁';
+    renderUI();
+}
+
 function renderUI() {
     const grid = document.getElementById('jigGrid');
     if (!grid) return;
@@ -423,6 +438,7 @@ function renderUI() {
 
     groupOrder.forEach(areaName => {
         const groupAreas = grouped[areaName];
+        const visibleAreas = hideInactive ? groupAreas.filter(a => isCardActive(a)) : groupAreas;
         const completedInGroup = groupAreas.filter(a => {
             const s = dailyStatus[a.id];
             return s && s.start && s.middle && s.end;
@@ -465,10 +481,20 @@ function renderUI() {
             </div>
         `;
 
+        if (hideInactive && visibleAreas.length === 0) return;
+
         const cardGrid = document.createElement('div');
         cardGrid.className = 'grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6';
-        groupAreas.forEach(area => cardGrid.appendChild(renderAreaCard(area)));
+        visibleAreas.forEach(area => cardGrid.appendChild(renderAreaCard(area)));
         section.appendChild(cardGrid);
+
+        const hiddenCount = groupAreas.length - visibleAreas.length;
+        if (hideInactive && hiddenCount > 0) {
+            const hiddenInfo = document.createElement('div');
+            hiddenInfo.className = 'mt-3 text-center text-[11px] font-bold text-slate-400 italic';
+            hiddenInfo.textContent = hiddenCount + ' jig tidak aktif disembunyikan';
+            section.appendChild(hiddenInfo);
+        }
 
         grid.appendChild(section);
     });
