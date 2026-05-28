@@ -32,6 +32,9 @@ let mqttClient = null;
 let mqttConnected = false;
 let areaProducts = {};
 let hideInactive = false;
+let leaderChecksToday = {};
+
+const LEADER_CHECKPOINT = 'leader_check';
 
 async function loadAreasFromSupabase() {
     try {
@@ -118,6 +121,45 @@ function canAccessSettings() {
     const email = (auth.username || '').toLowerCase();
     if (email === ADMIN_USERNAME) return true;
     return email.startsWith('leader');
+}
+
+function isCurrentUserLeader() {
+    const auth = getAuthUser();
+    if (!auth) return false;
+    const email = (auth.username || '').toLowerCase();
+    return email.startsWith('leader') || email === ADMIN_USERNAME;
+}
+
+function getLeaderLines() {
+    if (typeof LEADER_LINES !== 'undefined' && Array.isArray(LEADER_LINES) && LEADER_LINES.length) {
+        return LEADER_LINES.slice();
+    }
+    if (typeof MQTT_TOPIC_MAP !== 'undefined' && Array.isArray(MQTT_TOPIC_MAP)) {
+        return MQTT_TOPIC_MAP.map(e => e.area);
+    }
+    return [];
+}
+
+function normalizeLineName(name) {
+    return (name || '').trim().toUpperCase();
+}
+
+function buildLeaderChecksFromLogs(logs) {
+    const checks = {};
+    (logs || []).forEach(log => {
+        if (log.checkpoint !== LEADER_CHECKPOINT) return;
+        const line = normalizeLineName(log.jig_name);
+        if (!line) return;
+        const existing = checks[line];
+        if (!existing || new Date(log.created_at) > new Date(existing.created_at)) {
+            checks[line] = {
+                time: formatTime(log.created_at),
+                leaderName: resolveOperatorName(log.operator_email) || resolveOperatorName(log.operator_name),
+                created_at: log.created_at
+            };
+        }
+    });
+    return checks;
 }
 
 function escapeHtml(s) {
@@ -229,8 +271,10 @@ async function fetchData() {
             .order('created_at', { ascending: false })
             .limit(50);
 
-        dailyStatus = buildDailyStatusFromLogs(logsToday);
-        recentHistory = allLogs || [];
+        const jigLogsToday = (logsToday || []).filter(l => l.checkpoint !== LEADER_CHECKPOINT);
+        dailyStatus = buildDailyStatusFromLogs(jigLogsToday);
+        leaderChecksToday = buildLeaderChecksFromLogs(logsToday);
+        recentHistory = (allLogs || []).filter(l => l.checkpoint !== LEADER_CHECKPOINT);
         renderUI();
         detectProductFromScans();
     } catch (e) {
@@ -545,13 +589,15 @@ function renderUI() {
             return `
                 <tr class="hover:bg-slate-50 transition-colors">
                     <td class="p-4 font-mono text-[11px] text-slate-500">${new Date(log.created_at).toLocaleString('id-ID')}</td>
-                    <td class="p-4 font-black text-slate-800 text-sm">${escapeHtml(resolveOperatorName(log.operator_name || log.operator_email))}</td>
+                    <td class="p-4 font-black text-slate-800 text-sm">${escapeHtml(resolveOperatorName(log.operator_email) || resolveOperatorName(log.operator_name))}</td>
                     <td class="p-4 text-xs font-bold text-slate-500">${escapeHtml(displayJigName)}</td>
                     <td class="p-4"><span class="${cpClass} px-3 py-1 rounded-full text-[10px] font-black">${cp}</span></td>
                 </tr>
             `;
         }).join('') || '<tr><td colspan="4" class="p-10 text-center text-slate-300 font-bold italic uppercase">Belum ada aktivitas</td></tr>';
     }
+
+    renderLeaderCheckUI();
 }
 
 async function resetAreaToday(areaId) {
@@ -633,6 +679,158 @@ function closeQRModal() {
     if (modal) modal.style.display = 'none';
 }
 
+function renderLeaderCheckUI() {
+    const grid = document.getElementById('leaderCheckGrid');
+    const progressEl = document.getElementById('leaderCheckProgress');
+    if (!grid) return;
+
+    const lines = getLeaderLines();
+    const checkedCount = lines.filter(line => leaderChecksToday[normalizeLineName(line)]).length;
+
+    if (progressEl) {
+        progressEl.textContent = `${checkedCount}/${lines.length}`;
+        progressEl.className = checkedCount === lines.length && lines.length > 0
+            ? 'text-3xl font-black text-sky-600'
+            : 'text-3xl font-black text-slate-800';
+    }
+
+    if (!lines.length) {
+        grid.innerHTML = '<div class="col-span-full text-center text-slate-400 font-bold text-sm italic py-6">Belum ada konfigurasi line ASSY.</div>';
+        return;
+    }
+
+    grid.innerHTML = lines.map(line => {
+        const key = normalizeLineName(line);
+        const rec = leaderChecksToday[key];
+        const checked = !!rec;
+        return `
+            <div class="bg-white p-4 rounded-2xl shadow-sm border-2 ${checked ? 'card-leader-checked' : 'card-leader-pending'}">
+                <div class="flex justify-between items-start mb-2">
+                    <h3 class="font-black text-slate-800 text-lg uppercase">${escapeHtml(line)}</h3>
+                    ${checked
+                        ? '<span class="bg-sky-100 text-sky-700 px-2 py-0.5 rounded-full text-[9px] font-black uppercase">Sudah Check</span>'
+                        : '<span class="bg-slate-100 text-slate-500 px-2 py-0.5 rounded-full text-[9px] font-black uppercase">Belum</span>'}
+                </div>
+                ${checked
+                    ? `<p class="text-[10px] font-bold text-sky-600 mb-1">Leader: ${escapeHtml(rec.leaderName)}</p>
+                       <p class="text-[10px] font-black text-slate-500">${rec.time}</p>`
+                    : '<p class="text-[10px] font-bold text-slate-400 italic">Menunggu kunjungan leader</p>'}
+            </div>
+        `;
+    }).join('');
+}
+
+async function handleLeaderLineScan(lineName, source) {
+    source = source || 'manual';
+    const line = normalizeLineName(lineName);
+    const lines = getLeaderLines().map(normalizeLineName);
+
+    if (!lines.includes(line)) {
+        alert('Barcode line tidak dikenali: ' + lineName);
+        return;
+    }
+
+    if (!isCurrentUserLeader()) {
+        alert('Hanya Leader (atau Admin) yang dapat scan barcode kunjungan line.');
+        return;
+    }
+
+    if (_scanLock) return;
+    _scanLock = true;
+
+    try {
+        if (leaderChecksToday[line]) {
+            const ok = confirm(`Line ${line} sudah tercatat hari ini.\n\nScan ulang untuk update waktu kunjungan?`);
+            if (!ok) return;
+        }
+
+        const payload = {
+            jig_id: 0,
+            jig_name: line,
+            checkpoint: LEADER_CHECKPOINT,
+            operator_name: getOperatorName(),
+            operator_email: getOperatorEmail()
+        };
+
+        const { error } = await _supabase.from('patrol_logs').insert([payload]);
+        if (error) {
+            alert('Gagal menyimpan leader check.\n\n' + (error.message || ''));
+            return;
+        }
+
+        leaderChecksToday[line] = {
+            time: formatTime(new Date()),
+            leaderName: getOperatorName()
+        };
+        renderLeaderCheckUI();
+
+        const msg = `Leader check — ${line}`;
+        if (source === 'qr' || source === 'scanner') showScanToast(msg);
+        else alert('✓ ' + msg);
+
+        fetchData();
+    } catch (err) {
+        alert('Error: ' + (err.message || err));
+    } finally {
+        _scanLock = false;
+    }
+}
+
+function openLeaderQRModal() {
+    if (!canAccessSettings()) {
+        alert('Hanya Admin dan Leader yang dapat generate barcode line.');
+        return;
+    }
+    const modal = document.getElementById('leaderQrModal');
+    const printArea = document.getElementById('leaderQrPrintArea');
+    if (!modal || !printArea) return;
+    modal.style.display = 'flex';
+    printArea.innerHTML = '';
+
+    const baseUrl = getAppBaseUrl();
+    getLeaderLines().forEach(line => {
+        const qrUrl = `${baseUrl}?leader=${encodeURIComponent(line)}`;
+        const qrCard = document.createElement('div');
+        qrCard.className = 'qr-card-print border-2 border-sky-100 p-4 rounded-3xl flex flex-col items-center text-center bg-white shadow-sm';
+        qrCard.innerHTML = `
+            <div class="text-[9px] font-black text-sky-600 mb-2 uppercase tracking-widest">LEADER LINE</div>
+            <div class="qr-placeholder w-32 h-32 mb-3 flex items-center justify-center bg-slate-50 rounded-xl"></div>
+            <div class="font-black text-slate-800 text-lg leading-tight mb-1 uppercase">${escapeHtml(line)}</div>
+            <div class="text-[9px] text-slate-400 font-bold">Scan saat leader datang ke line</div>
+        `;
+        printArea.appendChild(qrCard);
+
+        const placeholder = qrCard.querySelector('.qr-placeholder');
+        try {
+            new QRCode(placeholder, { text: qrUrl, width: 128, height: 128 });
+            const downloadBtn = document.createElement('button');
+            downloadBtn.className = 'mt-2 text-[9px] font-black text-sky-600 hover:text-sky-800 underline';
+            downloadBtn.textContent = 'Download QR';
+            downloadBtn.addEventListener('click', function () {
+                const imgOrCanvas = placeholder.querySelector('canvas') || placeholder.querySelector('img');
+                if (!imgOrCanvas) { alert('QR belum siap.'); return; }
+                const dataUrl = imgOrCanvas.tagName.toLowerCase() === 'canvas'
+                    ? imgOrCanvas.toDataURL('image/png')
+                    : imgOrCanvas.src;
+                const link = document.createElement('a');
+                link.href = dataUrl;
+                link.download = `QR_Leader_${line}.png`;
+                document.body.appendChild(link);
+                link.click();
+                document.body.removeChild(link);
+            });
+            qrCard.appendChild(downloadBtn);
+        } catch (e) {
+            placeholder.innerHTML = '<span class="text-slate-400 text-xs">Error</span>';
+        }
+    });
+}
+
+function closeLeaderQRModal() {
+    const modal = document.getElementById('leaderQrModal');
+    if (modal) modal.style.display = 'none';
+}
+
 function openSettingsModal() {
     if (!canAccessSettings()) {
         alert('Hanya Admin dan Leader yang bisa mengakses Pengaturan Jig.');
@@ -703,7 +901,13 @@ function closeSettingsModal() {
 
 function checkAutoScan() {
     const params = new URLSearchParams(window.location.search);
+    const leaderParam = params.get('leader');
     const idParam = params.get('scan');
+    if (leaderParam) {
+        window.history.replaceState({}, document.title, window.location.pathname);
+        handleLeaderLineScan(decodeURIComponent(leaderParam), 'qr');
+        return;
+    }
     if (idParam) {
         window.history.replaceState({}, document.title, window.location.pathname);
         handleBarcodeScan(idParam, 'qr');
@@ -740,19 +944,28 @@ function processScannerInput(raw) {
     if (!raw) return;
 
     let jigId = null;
+    let leaderLine = null;
     if (/^\d+$/.test(raw)) {
         jigId = parseInt(raw, 10);
     } else {
         try {
             const url = new URL(raw);
             const scan = url.searchParams.get('scan');
+            const leader = url.searchParams.get('leader');
+            if (leader) leaderLine = decodeURIComponent(leader);
             if (scan) jigId = parseInt(scan, 10);
         } catch (_) {
+            const leaderMatch = raw.match(/[?&]leader=([^&]+)/i);
+            if (leaderMatch) leaderLine = decodeURIComponent(leaderMatch[1]);
             const match = raw.match(/[?&]scan=(\d+)/);
             if (match) jigId = parseInt(match[1], 10);
         }
     }
 
+    if (leaderLine) {
+        handleLeaderLineScan(leaderLine, 'scanner');
+        return;
+    }
     if (jigId) handleBarcodeScan(jigId, 'scanner');
     else alert('Barcode tidak valid: ' + raw);
 }
@@ -1392,4 +1605,7 @@ document.addEventListener('DOMContentLoaded', async () => {
 
     const btnKelola = document.getElementById('btnKelolaAkun');
     if (btnKelola) btnKelola.style.display = isCurrentUserAdmin() ? '' : 'none';
+
+    const btnLeaderBarcode = document.getElementById('btnLeaderBarcode');
+    if (btnLeaderBarcode) btnLeaderBarcode.style.display = canAccessSettings() ? '' : 'none';
 });
