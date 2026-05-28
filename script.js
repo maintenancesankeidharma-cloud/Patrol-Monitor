@@ -115,19 +115,35 @@ function isCurrentUserAdmin() {
     return auth && auth.username === ADMIN_USERNAME;
 }
 
-function canAccessSettings() {
+function getCurrentUserRole() {
     const auth = getAuthUser();
-    if (!auth) return false;
-    const email = (auth.username || '').toLowerCase();
-    if (email === ADMIN_USERNAME) return true;
-    return email.startsWith('leader');
+    if (!auth) return null;
+
+    const email = (auth.username || '').toLowerCase().trim();
+    if (!email) return null;
+    if (email === ADMIN_USERNAME) return 'admin';
+
+    const profile = ACCOUNT_PROFILES[email];
+    if (profile) {
+        if (email.startsWith('leader')) return 'leader';
+        if (email.startsWith('pic')) return 'pic';
+    }
+
+    // Fallback untuk username lokal/non-email yang memakai pola role.
+    if (email.startsWith('leader')) return 'leader';
+    if (email.startsWith('pic')) return 'pic';
+
+    return 'operator';
+}
+
+function canAccessSettings() {
+    const role = getCurrentUserRole();
+    return role === 'admin' || role === 'leader' || role === 'pic';
 }
 
 function isCurrentUserLeader() {
-    const auth = getAuthUser();
-    if (!auth) return false;
-    const email = (auth.username || '').toLowerCase();
-    return email.startsWith('leader') || email === ADMIN_USERNAME;
+    const role = getCurrentUserRole();
+    return role === 'leader' || role === 'admin';
 }
 
 function getLeaderLines() {
