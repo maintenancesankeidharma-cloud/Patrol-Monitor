@@ -76,10 +76,19 @@ const CONFIG_AREAS = [
  * di CONFIG_AREAS / Supabase.
  */
 const MQTT_TOPIC_MAP = [
-    { topic: '/assy9/running', area: 'ASSY9' },
-    { topic: '/assy8/running', area: 'ASSY8' },
-    { topic: '/assy7/running', area: 'ASSY7' },
-    { topic: '/assy6/running', area: 'ASSY6' },
+    { topic: '/assy1/running', area: 'ASSY1' },
+    { topic: '/assy2/running', area: 'ASSY2' },
     { topic: '/assy3/running', area: 'ASSY3' },
-    { topic: '/assy2/running', area: 'ASSY2' }
+    { topic: '/assy4/running', area: 'ASSY4' },
+    { topic: '/assy5/running', area: 'ASSY5' },
+    { topic: '/assy6/running', area: 'ASSY6' },
+    { topic: '/assy7/running', area: 'ASSY7' },
+    { topic: '/assy8/running', area: 'ASSY8' },
+    { topic: '/assy9/running', area: 'ASSY9' }
 ];
+
+/**
+ * Line produksi untuk Leader Check (scan barcode per line).
+ * Harus selaras dengan area di MQTT_TOPIC_MAP.
+ */
+const LEADER_LINES = MQTT_TOPIC_MAP.map(entry => entry.area);
