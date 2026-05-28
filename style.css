@@ -58,3 +58,14 @@
 .transition-all {
     transition: all 0.3s ease-in-out;
 }
+
+/* Leader check per line */
+.card-leader-checked {
+    border-left: 8px solid #0ea5e9;
+    border-top: 1px solid #e5e7eb;
+}
+
+.card-leader-pending {
+    border-left: 8px solid #cbd5e1;
+    border-top: 1px solid #e5e7eb;
+}
