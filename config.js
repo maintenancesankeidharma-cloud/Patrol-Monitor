@@ -26,7 +26,7 @@ const ACCOUNT_PROFILES = {
  * Periode shift 1: 07:00 – 19:59
  * Periode shift 2: 20:00 – 06:59 (keesokan hari)
  */
-const RESET_HOURS = [7, 20];
+const RESET_HOURS = [7, 21];
 
 /**
  * ============================================================
