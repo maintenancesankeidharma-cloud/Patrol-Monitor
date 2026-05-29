@@ -1568,28 +1568,18 @@ function getTopicToAreaMap() {
     return map;
 }
 
-function getCounterTopicVariants(entry) {
-    const base = entry.topic.replace(/\/running$/i, '');
-    const assyNum = base.match(/assy(\d+)/i);
-    const variants = new Set();
-    if (entry.counterTopic) variants.add(entry.counterTopic);
-    variants.add(`${base}-counter-robot`);
-    variants.add(`${base}/counter-robot`);
-    if (assyNum) {
-        variants.add(`/assy${assyNum[1]}-counter-robot`);
-        variants.add(`/assy${assyNum[1]}/counter-robot`);
-        variants.add(`assy${assyNum[1]}-counter-robot`);
-    }
-    return [...variants];
+function getCounterTopicForEntry(entry) {
+    if (entry.counterTopic) return normalizeMqttTopic(entry.counterTopic);
+    const match = entry.topic.match(/\/assy(\d+)\/running$/i);
+    if (match) return `/assy${match[1]}-counter-robot`;
+    return normalizeMqttTopic(entry.topic.replace(/\/running$/i, '-counter-robot'));
 }
 
 function getCounterTopicToAreaMap() {
     if (typeof MQTT_TOPIC_MAP === 'undefined' || !Array.isArray(MQTT_TOPIC_MAP)) return {};
     const map = {};
     MQTT_TOPIC_MAP.forEach(entry => {
-        getCounterTopicVariants(entry).forEach(topic => {
-            map[normalizeMqttTopic(topic)] = normalizeAreaKey(entry.area);
-        });
+        map[getCounterTopicForEntry(entry)] = normalizeAreaKey(entry.area);
     });
     return map;
 }
@@ -1599,18 +1589,43 @@ function resolveCounterAreaFromTopic(topic) {
     const normalized = normalizeMqttTopic(topic);
     if (counterTopicToArea[normalized]) return counterTopicToArea[normalized];
 
-    const match = normalized.match(/\/assy(\d+)(?:-|\/)counter-robot$/);
+    const match = normalized.match(/\/assy(\d+)-counter-robot$/);
     if (match) return 'ASSY' + match[1];
     return null;
 }
 
 function getAllCounterTopics() {
     if (typeof MQTT_TOPIC_MAP === 'undefined' || !Array.isArray(MQTT_TOPIC_MAP)) return [];
+    return MQTT_TOPIC_MAP.map(getCounterTopicForEntry);
+}
+
+function getUniqueMqttTopics() {
     const topics = new Set();
-    MQTT_TOPIC_MAP.forEach(entry => {
-        getCounterTopicVariants(entry).forEach(t => topics.add(normalizeMqttTopic(t)));
-    });
+    if (MQTT_CONFIG && MQTT_CONFIG.topic) topics.add(normalizeMqttTopic(MQTT_CONFIG.topic));
+    Object.keys(getTopicToAreaMap()).forEach(t => topics.add(normalizeMqttTopic(t)));
+    getAllCounterTopics().forEach(t => topics.add(normalizeMqttTopic(t)));
     return [...topics];
+}
+
+function subscribeMqttTopics(client, topics) {
+    const unique = [...new Set((topics || []).map(normalizeMqttTopic).filter(Boolean))];
+    unique.forEach(function (topic, index) {
+        setTimeout(function () {
+            client.subscribe(topic, { qos: 1 }, function (err) {
+                if (err) {
+                    console.error('Subscribe error:', topic, err.message || err);
+                    setTimeout(function () {
+                        client.subscribe(topic, { qos: 1 }, function (retryErr) {
+                            if (retryErr) console.error('Subscribe retry failed:', topic, retryErr.message || retryErr);
+                            else console.log('Subscribed (retry):', topic);
+                        });
+                    }, 1500);
+                } else {
+                    console.log('Subscribed:', topic);
+                }
+            });
+        }, index * 150);
+    });
 }
 
 function parseProductPayload(message) {
@@ -1649,8 +1664,6 @@ function connectMQTT() {
     }
 
     const topicToArea = getTopicToAreaMap();
-    const counterTopics = getAllCounterTopics();
-    const perAreaTopics = Object.keys(topicToArea);
 
     try {
         mqttClient = mqtt.connect(MQTT_CONFIG.broker, {
@@ -1665,13 +1678,9 @@ function connectMQTT() {
             console.log('MQTT terhubung ke EMQX Cloud');
             mqttConnected = true;
 
-            const allTopics = [MQTT_CONFIG.topic, ...perAreaTopics, ...counterTopics];
-            allTopics.forEach(function (t) {
-                mqttClient.subscribe(t, { qos: 1 }, function (err) {
-                    if (err) console.error('Subscribe error:', t, err);
-                    else console.log('Subscribed:', t);
-                });
-            });
+            const allTopics = getUniqueMqttTopics();
+            console.log('MQTT subscribe total:', allTopics.length, 'topics');
+            subscribeMqttTopics(mqttClient, allTopics);
 
             updateProductUI();
         });
