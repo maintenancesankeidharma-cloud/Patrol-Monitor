@@ -31,6 +31,7 @@ let productSource = null;
 let mqttClient = null;
 let mqttConnected = false;
 let areaProducts = {};
+let areaCounters = {};
 let hideInactive = false;
 let leaderChecksToday = {};
 
@@ -498,6 +499,7 @@ function renderAreaCard(area) {
     const running = isJigRunning(area);
     const runningModel = getRunningModel(area);
     const showWaitingScan = running || !!status.start;
+    const robotCounter = running && areaCounters[area.area] != null ? areaCounters[area.area] : null;
 
     const card = document.createElement('div');
     let cardClass = 'card-inactive';
@@ -517,6 +519,7 @@ function renderAreaCard(area) {
             <div class="flex items-center gap-1.5">
                 <span class="text-[10px] font-black text-slate-300">#${String(area.id).padStart(2, '0')}</span>
                 ${running ? '<span class="flex items-center gap-1 bg-violet-600 text-white px-2 py-0.5 rounded-full text-[9px] font-black uppercase"><span style="animation:pulse-dot 1.5s ease-in-out infinite" class="inline-block w-1.5 h-1.5 bg-white rounded-full"></span>Running</span>' : ''}
+                ${robotCounter != null ? `<span class="inline-flex flex-col items-center justify-center bg-sky-600 text-white px-2 py-0.5 rounded-lg text-[8px] font-black leading-tight min-w-[2.75rem]"><span class="uppercase tracking-wide">Counter :</span><span class="text-xs tabular-nums">${robotCounter}</span></span>` : ''}
                 ${!running && isActive ? '<span class="flex items-center gap-1 bg-amber-500 text-white px-2 py-0.5 rounded-full text-[9px] font-black uppercase"><span style="animation:pulse-dot 1.5s ease-in-out infinite" class="inline-block w-1.5 h-1.5 bg-white rounded-full"></span>Active</span>' : ''}
                 ${complete ? '<span class="flex items-center gap-1 bg-emerald-500 text-white px-2 py-0.5 rounded-full text-[9px] font-black uppercase">Done</span>' : ''}
             </div>
@@ -1540,6 +1543,20 @@ function getTopicToAreaMap() {
     return map;
 }
 
+function getCounterTopicForEntry(entry) {
+    if (entry.counterTopic) return entry.counterTopic;
+    return entry.topic.replace(/\/running$/, '-counter-robot');
+}
+
+function getCounterTopicToAreaMap() {
+    if (typeof MQTT_TOPIC_MAP === 'undefined' || !Array.isArray(MQTT_TOPIC_MAP)) return {};
+    const map = {};
+    MQTT_TOPIC_MAP.forEach(entry => {
+        map[getCounterTopicForEntry(entry)] = entry.area;
+    });
+    return map;
+}
+
 function parseProductPayload(message) {
     const raw = message.toString().trim();
     if (!raw) return null;
@@ -1551,6 +1568,19 @@ function parseProductPayload(message) {
     }
 }
 
+function parseCounterPayload(message) {
+    const raw = message.toString().trim();
+    if (!raw) return null;
+    try {
+        const json = JSON.parse(raw);
+        if (json.counter_robot == null || json.counter_robot === '') return null;
+        const n = Number(json.counter_robot);
+        return Number.isFinite(n) ? n : null;
+    } catch (_) {
+        return null;
+    }
+}
+
 function connectMQTT() {
     if (typeof mqtt === 'undefined' || typeof MQTT_CONFIG === 'undefined') {
         console.warn('MQTT library atau config belum tersedia.');
@@ -1558,7 +1588,9 @@ function connectMQTT() {
     }
 
     const topicToArea = getTopicToAreaMap();
+    const counterTopicToArea = getCounterTopicToAreaMap();
     const perAreaTopics = Object.keys(topicToArea);
+    const counterTopics = Object.keys(counterTopicToArea);
 
     try {
         mqttClient = mqtt.connect(MQTT_CONFIG.broker, {
@@ -1573,7 +1605,7 @@ function connectMQTT() {
             console.log('MQTT terhubung ke EMQX Cloud');
             mqttConnected = true;
 
-            const allTopics = [MQTT_CONFIG.topic, ...perAreaTopics];
+            const allTopics = [MQTT_CONFIG.topic, ...perAreaTopics, ...counterTopics];
             allTopics.forEach(function (t) {
                 mqttClient.subscribe(t, { qos: 1 }, function (err) {
                     if (err) console.error('Subscribe error:', t, err);
@@ -1585,6 +1617,16 @@ function connectMQTT() {
         });
 
         mqttClient.on('message', function (topic, message) {
+            const counterArea = counterTopicToArea[topic];
+            if (counterArea) {
+                const counter = parseCounterPayload(message);
+                if (counter != null) {
+                    areaCounters[counterArea] = counter;
+                    renderUI();
+                }
+                return;
+            }
+
             const product = parseProductPayload(message);
             if (!product) return;
 
