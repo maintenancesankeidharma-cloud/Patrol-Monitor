@@ -136,11 +136,6 @@ function getCurrentUserRole() {
     return 'operator';
 }
 
-function canAccessSettings() {
-    const role = getCurrentUserRole();
-    return role === 'admin' || role === 'leader' || role === 'pic';
-}
-
 function isCurrentUserLeader() {
     const role = getCurrentUserRole();
     return role === 'leader' || role === 'admin';
@@ -163,19 +158,81 @@ function normalizeLineName(name) {
 function buildLeaderChecksFromLogs(logs) {
     const checks = {};
     (logs || []).forEach(log => {
-        if (log.checkpoint !== LEADER_CHECKPOINT) return;
+        if (log.jig_id !== 0 && log.checkpoint !== LEADER_CHECKPOINT) return;
         const line = normalizeLineName(log.jig_name);
         if (!line) return;
-        const existing = checks[line];
-        if (!existing || new Date(log.created_at) > new Date(existing.created_at)) {
-            checks[line] = {
-                time: formatTime(log.created_at),
-                leaderName: resolveOperatorName(log.operator_email) || resolveOperatorName(log.operator_name),
-                created_at: log.created_at
-            };
+
+        if (log.checkpoint === LEADER_CHECKPOINT) {
+            if (!checks[line]) {
+                const t = formatTime(log.created_at);
+                checks[line] = {
+                    start: t,
+                    middle: t,
+                    end: t,
+                    leaderName: resolveOperatorName(log.operator_email) || resolveOperatorName(log.operator_name),
+                    created_at: log.created_at,
+                    legacy: true
+                };
+            }
+            return;
+        }
+
+        if (!CHECKPOINTS.includes(log.checkpoint)) return;
+
+        if (!checks[line]) {
+            checks[line] = { start: null, middle: null, end: null, leaderName: null, created_at: log.created_at };
+        }
+        if (!checks[line][log.checkpoint]) {
+            checks[line][log.checkpoint] = formatTime(log.created_at);
+            const name = resolveOperatorName(log.operator_email) || resolveOperatorName(log.operator_name);
+            if (name) checks[line].leaderName = name;
+            if (new Date(log.created_at) > new Date(checks[line].created_at || 0)) {
+                checks[line].created_at = log.created_at;
+            }
         }
     });
     return checks;
+}
+
+function isLeaderLineComplete(rec) {
+    return rec && rec.start && rec.middle && rec.end;
+}
+
+function getNextLeaderCheckpoint(line) {
+    const s = leaderChecksToday[line] || { start: null, middle: null, end: null };
+    if (s.legacy) return null;
+    if (!s.start) return 'start';
+    if (!s.middle) return 'middle';
+    if (!s.end) return 'end';
+    return null;
+}
+
+async function getNextLeaderCheckpointFromServer(line) {
+    const key = normalizeLineName(line);
+    try {
+        const { start, end } = getTodayRange();
+        const { data, error } = await _supabase
+            .from('patrol_logs')
+            .select('checkpoint')
+            .eq('jig_id', 0)
+            .eq('jig_name', key)
+            .gte('created_at', start)
+            .lte('created_at', end);
+
+        if (error) {
+            console.error('Query leader checkpoint error:', error.message);
+            return getNextLeaderCheckpoint(key);
+        }
+
+        const done = new Set((data || []).map(r => r.checkpoint));
+        if (done.has(LEADER_CHECKPOINT)) return null;
+        if (!done.has('start')) return 'start';
+        if (!done.has('middle')) return 'middle';
+        if (!done.has('end')) return 'end';
+        return null;
+    } catch (_) {
+        return getNextLeaderCheckpoint(key);
+    }
 }
 
 function escapeHtml(s) {
@@ -287,10 +344,11 @@ async function fetchData() {
             .order('created_at', { ascending: false })
             .limit(50);
 
-        const jigLogsToday = (logsToday || []).filter(l => l.checkpoint !== LEADER_CHECKPOINT);
+        const jigLogsToday = (logsToday || []).filter(l => l.jig_id !== 0 && l.checkpoint !== LEADER_CHECKPOINT);
         dailyStatus = buildDailyStatusFromLogs(jigLogsToday);
-        leaderChecksToday = buildLeaderChecksFromLogs(logsToday);
-        recentHistory = (allLogs || []).filter(l => l.checkpoint !== LEADER_CHECKPOINT);
+        const leaderLogsToday = (logsToday || []).filter(l => l.jig_id === 0 || l.checkpoint === LEADER_CHECKPOINT);
+        leaderChecksToday = buildLeaderChecksFromLogs(leaderLogsToday);
+        recentHistory = (allLogs || []).filter(l => l.jig_id !== 0 && l.checkpoint !== LEADER_CHECKPOINT);
         renderUI();
         detectProductFromScans();
     } catch (e) {
@@ -644,6 +702,10 @@ function getAppBaseUrl() {
 }
 
 function openQRModal() {
+    if (!isCurrentUserAdmin()) {
+        alert('Hanya Admin yang dapat generate barcode jig.');
+        return;
+    }
     const modal = document.getElementById('qrModal');
     const printArea = document.getElementById('qrPrintArea');
     if (!modal || !printArea) return;
@@ -701,7 +763,7 @@ function renderLeaderCheckUI() {
     if (!grid) return;
 
     const lines = getLeaderLines();
-    const checkedCount = lines.filter(line => leaderChecksToday[normalizeLineName(line)]).length;
+    const checkedCount = lines.filter(line => isLeaderLineComplete(leaderChecksToday[normalizeLineName(line)])).length;
 
     if (progressEl) {
         progressEl.textContent = `${checkedCount}/${lines.length}`;
@@ -717,20 +779,25 @@ function renderLeaderCheckUI() {
 
     grid.innerHTML = lines.map(line => {
         const key = normalizeLineName(line);
-        const rec = leaderChecksToday[key];
-        const checked = !!rec;
+        const status = leaderChecksToday[key] || { start: null, middle: null, end: null, leaderName: null };
+        const nextCp = getNextLeaderCheckpoint(key);
+        const complete = !nextCp;
+        const progressCount = CHECKPOINTS.filter(cp => status[cp]).length;
+
         return `
-            <div class="bg-white p-4 rounded-2xl shadow-sm border-2 ${checked ? 'card-leader-checked' : 'card-leader-pending'}">
+            <div class="bg-white p-4 rounded-2xl shadow-sm border-2 ${complete ? 'card-leader-checked' : 'card-leader-pending'}">
                 <div class="flex justify-between items-start mb-2">
                     <h3 class="font-black text-slate-800 text-lg uppercase">${escapeHtml(line)}</h3>
-                    ${checked
-                        ? '<span class="bg-sky-100 text-sky-700 px-2 py-0.5 rounded-full text-[9px] font-black uppercase">Sudah Check</span>'
-                        : '<span class="bg-slate-100 text-slate-500 px-2 py-0.5 rounded-full text-[9px] font-black uppercase">Belum</span>'}
+                    <span class="text-[10px] font-black px-2 py-0.5 rounded-full ${complete ? 'bg-sky-100 text-sky-700' : 'bg-slate-100 text-slate-500'}">${progressCount}/3</span>
                 </div>
-                ${checked
-                    ? `<p class="text-[10px] font-bold text-sky-600 mb-1">Leader: ${escapeHtml(rec.leaderName)}</p>
-                       <p class="text-[10px] font-black text-slate-500">${rec.time}</p>`
-                    : '<p class="text-[10px] font-bold text-slate-400 italic">Menunggu kunjungan leader</p>'}
+                ${status.leaderName
+                    ? `<p class="text-[10px] font-bold text-sky-600 mb-2">Leader: ${escapeHtml(status.leaderName)}</p>`
+                    : '<p class="text-[10px] font-bold text-slate-400 italic mb-2">Menunggu scan leader</p>'}
+                <div class="space-y-2">
+                    ${renderCheckpointRow('START', status.start, nextCp === 'start')}
+                    ${renderCheckpointRow('MIDDLE', status.middle, nextCp === 'middle')}
+                    ${renderCheckpointRow('END', status.end, nextCp === 'end')}
+                </div>
             </div>
         `;
     }).join('');
@@ -755,15 +822,16 @@ async function handleLeaderLineScan(lineName, source) {
     _scanLock = true;
 
     try {
-        if (leaderChecksToday[line]) {
-            const ok = confirm(`Line ${line} sudah tercatat hari ini.\n\nScan ulang untuk update waktu kunjungan?`);
-            if (!ok) return;
+        const nextCp = await getNextLeaderCheckpointFromServer(line);
+        if (!nextCp) {
+            alert(`Line ${line} sudah lengkap hari ini (Start, Middle, End).`);
+            return;
         }
 
         const payload = {
             jig_id: 0,
             jig_name: line,
-            checkpoint: LEADER_CHECKPOINT,
+            checkpoint: nextCp,
             operator_name: getOperatorName(),
             operator_email: getOperatorEmail()
         };
@@ -774,13 +842,15 @@ async function handleLeaderLineScan(lineName, source) {
             return;
         }
 
-        leaderChecksToday[line] = {
-            time: formatTime(new Date()),
-            leaderName: getOperatorName()
-        };
+        if (!leaderChecksToday[line]) {
+            leaderChecksToday[line] = { start: null, middle: null, end: null, leaderName: getOperatorName() };
+        }
+        leaderChecksToday[line][nextCp] = formatTime(new Date());
+        leaderChecksToday[line].leaderName = getOperatorName();
         renderLeaderCheckUI();
 
-        const msg = `Leader check — ${line}`;
+        const label = CHECKPOINT_LABELS[nextCp];
+        const msg = `${label} tercatat — ${line}`;
         if (source === 'qr' || source === 'scanner') showScanToast(msg);
         else alert('✓ ' + msg);
 
@@ -793,8 +863,8 @@ async function handleLeaderLineScan(lineName, source) {
 }
 
 function openLeaderQRModal() {
-    if (!canAccessSettings()) {
-        alert('Hanya Admin dan Leader yang dapat generate barcode line.');
+    if (!isCurrentUserAdmin()) {
+        alert('Hanya Admin yang dapat generate barcode line.');
         return;
     }
     const modal = document.getElementById('leaderQrModal');
@@ -812,7 +882,7 @@ function openLeaderQRModal() {
             <div class="text-[9px] font-black text-sky-600 mb-2 uppercase tracking-widest">LEADER LINE</div>
             <div class="qr-placeholder w-32 h-32 mb-3 flex items-center justify-center bg-slate-50 rounded-xl"></div>
             <div class="font-black text-slate-800 text-lg leading-tight mb-1 uppercase">${escapeHtml(line)}</div>
-            <div class="text-[9px] text-slate-400 font-bold">Scan saat leader datang ke line</div>
+            <div class="text-[9px] text-slate-400 font-bold">Scan 3×: Start → Middle → End</div>
         `;
         printArea.appendChild(qrCard);
 
@@ -848,8 +918,8 @@ function closeLeaderQRModal() {
 }
 
 function openSettingsModal() {
-    if (!canAccessSettings()) {
-        alert('Hanya Admin dan Leader yang bisa mengakses Pengaturan Jig.');
+    if (!isCurrentUserAdmin()) {
+        alert('Hanya Admin yang bisa mengakses Pengaturan Jig.');
         return;
     }
     const tbody = document.getElementById('settingsTableBody');
@@ -1342,6 +1412,10 @@ function saveStoredUsers(users) {
 }
 
 function openAccountsModal() {
+    if (!isCurrentUserAdmin()) {
+        alert('Hanya Admin yang dapat mengelola akun.');
+        return;
+    }
     renderAccountsTable();
     document.getElementById('newAccountUser').value = '';
     document.getElementById('newAccountPass').value = '';
@@ -1616,12 +1690,9 @@ document.addEventListener('DOMContentLoaded', async () => {
         if (!document.hidden) fetchData();
     });
 
-    const btnSettings = document.getElementById('btnSettings');
-    if (btnSettings) btnSettings.style.display = canAccessSettings() ? '' : 'none';
-
-    const btnKelola = document.getElementById('btnKelolaAkun');
-    if (btnKelola) btnKelola.style.display = isCurrentUserAdmin() ? '' : 'none';
-
-    const btnLeaderBarcode = document.getElementById('btnLeaderBarcode');
-    if (btnLeaderBarcode) btnLeaderBarcode.style.display = canAccessSettings() ? '' : 'none';
+    const isAdmin = isCurrentUserAdmin();
+    ['btnSettings', 'btnBarcodeJig', 'btnLeaderBarcode', 'btnKelolaAkun'].forEach(function (id) {
+        const btn = document.getElementById(id);
+        if (btn) btn.style.display = isAdmin ? '' : 'none';
+    });
 });
