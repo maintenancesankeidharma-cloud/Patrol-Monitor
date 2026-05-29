@@ -29,6 +29,7 @@ let recentHistory = [];
 let currentProduct = null;
 let productSource = null;
 let mqttClient = null;
+let mqttCounterClient = null;
 let mqttConnected = false;
 let areaProducts = {};
 let areaCounters = {};
@@ -1499,6 +1500,7 @@ function handleLogout() {
         localStorage.removeItem(AUTH_STORAGE_KEY);
         _supabase.auth.signOut();
         if (mqttClient) mqttClient.end();
+        if (mqttCounterClient) mqttCounterClient.end();
     } catch (_) {}
     window.location.href = 'login.html';
 }
@@ -1599,32 +1601,86 @@ function getAllCounterTopics() {
     return MQTT_TOPIC_MAP.map(getCounterTopicForEntry);
 }
 
-function getUniqueMqttTopics() {
+function getRunningMqttTopics() {
     const topics = new Set();
     if (MQTT_CONFIG && MQTT_CONFIG.topic) topics.add(normalizeMqttTopic(MQTT_CONFIG.topic));
     Object.keys(getTopicToAreaMap()).forEach(t => topics.add(normalizeMqttTopic(t)));
-    getAllCounterTopics().forEach(t => topics.add(normalizeMqttTopic(t)));
     return [...topics];
 }
 
-function subscribeMqttTopics(client, topics) {
+function subscribeMqttTopicsSequential(client, topics, label) {
     const unique = [...new Set((topics || []).map(normalizeMqttTopic).filter(Boolean))];
-    unique.forEach(function (topic, index) {
-        setTimeout(function () {
-            client.subscribe(topic, { qos: 1 }, function (err) {
-                if (err) {
-                    console.error('Subscribe error:', topic, err.message || err);
-                    setTimeout(function () {
-                        client.subscribe(topic, { qos: 1 }, function (retryErr) {
-                            if (retryErr) console.error('Subscribe retry failed:', topic, retryErr.message || retryErr);
-                            else console.log('Subscribed (retry):', topic);
-                        });
-                    }, 1500);
-                } else {
-                    console.log('Subscribed:', topic);
-                }
-            });
-        }, index * 150);
+    let index = 0;
+
+    function subscribeNext() {
+        if (index >= unique.length) {
+            console.log('MQTT subscribe selesai (' + label + '):', unique.length, 'topic');
+            return;
+        }
+
+        const topic = unique[index++];
+        client.subscribe(topic, { qos: 1 }, function (err) {
+            if (err) {
+                console.error('Subscribe error (' + label + '):', topic, err.message || err);
+                setTimeout(subscribeNext, 400);
+                return;
+            }
+            console.log('Subscribed (' + label + '):', topic);
+            setTimeout(subscribeNext, 120);
+        });
+    }
+
+    subscribeNext();
+}
+
+function refreshMqttConnectedState() {
+    const runningOk = mqttClient && mqttClient.connected;
+    const counterOk = mqttCounterClient && mqttCounterClient.connected;
+    mqttConnected = !!(runningOk || counterOk);
+    updateProductUI();
+}
+
+function handleMqttCounterMessage(topic, message) {
+    const counterArea = resolveCounterAreaFromTopic(topic);
+    if (!counterArea) return;
+
+    const counter = tryExtractCounterFromMessage(message);
+    if (counter == null) return;
+
+    setAreaCounter(counterArea, counter);
+    console.log('Counter robot:', counterArea, counter, '←', topic);
+    renderUI();
+    updateProductUI();
+}
+
+function handleMqttRunningMessage(topic, message, topicToArea) {
+    const product = parseProductPayload(message);
+    if (!product) return;
+
+    const modelTopic = normalizeMqttTopic(MQTT_CONFIG.topic);
+    if (normalizeMqttTopic(topic) === modelTopic) {
+        currentProduct = product;
+        productSource = 'mqtt';
+        updateProductUI();
+        return;
+    }
+
+    const areaName = topicToArea[topic] || topicToArea[normalizeMqttTopic(topic)];
+    if (!areaName) return;
+
+    areaProducts[normalizeAreaKey(areaName)] = product;
+    renderUI();
+    updateProductUI();
+}
+
+function createMqttConnection(options) {
+    return mqtt.connect(MQTT_CONFIG.broker, {
+        username: MQTT_CONFIG.username,
+        password: MQTT_CONFIG.password,
+        reconnectPeriod: MQTT_CONFIG.reconnectPeriod || 5000,
+        connectTimeout: MQTT_CONFIG.connectTimeout || 10000,
+        rejectUnauthorized: false,
+        clientId: options.clientId
     });
 }
 
@@ -1664,74 +1720,48 @@ function connectMQTT() {
     }
 
     const topicToArea = getTopicToAreaMap();
+    const runningTopics = getRunningMqttTopics();
+    const counterTopics = getAllCounterTopics();
+    const clientSuffix = 'patrol_' + Math.random().toString(16).slice(2, 10);
 
     try {
-        mqttClient = mqtt.connect(MQTT_CONFIG.broker, {
-            username: MQTT_CONFIG.username,
-            password: MQTT_CONFIG.password,
-            reconnectPeriod: MQTT_CONFIG.reconnectPeriod || 5000,
-            connectTimeout: MQTT_CONFIG.connectTimeout || 10000,
-            rejectUnauthorized: false
-        });
+        if (mqttClient) mqttClient.end(true);
+        if (mqttCounterClient) mqttCounterClient.end(true);
 
+        mqttClient = createMqttConnection({ clientId: clientSuffix + '_run' });
         mqttClient.on('connect', function () {
-            console.log('MQTT terhubung ke EMQX Cloud');
-            mqttConnected = true;
-
-            const allTopics = getUniqueMqttTopics();
-            console.log('MQTT subscribe total:', allTopics.length, 'topics');
-            subscribeMqttTopics(mqttClient, allTopics);
-
-            updateProductUI();
+            console.log('MQTT running terhubung — subscribe', runningTopics.length, 'topic');
+            subscribeMqttTopicsSequential(mqttClient, runningTopics, 'running');
+            refreshMqttConnectedState();
         });
-
         mqttClient.on('message', function (topic, message) {
-            const counterArea = resolveCounterAreaFromTopic(topic);
-            if (counterArea) {
-                const counter = tryExtractCounterFromMessage(message);
-                if (counter != null) {
-                    setAreaCounter(counterArea, counter);
-                    console.log('Counter robot:', counterArea, counter, '←', topic);
-                    renderUI();
-                    updateProductUI();
-                }
-                return;
-            }
-
-            const product = parseProductPayload(message);
-            if (!product) return;
-
-            if (topic === MQTT_CONFIG.topic) {
-                currentProduct = product;
-                productSource = 'mqtt';
-                updateProductUI();
-                return;
-            }
-
-            const areaName = topicToArea[topic] || topicToArea[normalizeMqttTopic(topic)];
-            if (areaName) {
-                const key = normalizeAreaKey(areaName);
-                areaProducts[key] = product;
-                const counter = tryExtractCounterFromMessage(message);
-                if (counter != null) setAreaCounter(key, counter);
-                renderUI();
-                updateProductUI();
-            }
+            handleMqttRunningMessage(topic, message, topicToArea);
         });
-
         mqttClient.on('error', function (err) {
-            console.error('MQTT error:', err.message);
-            mqttConnected = false;
-            updateProductUI();
+            console.error('MQTT error (running):', err.message);
+            refreshMqttConnectedState();
         });
-
-        mqttClient.on('close', function () {
-            mqttConnected = false;
-            updateProductUI();
-        });
-
+        mqttClient.on('close', refreshMqttConnectedState);
         mqttClient.on('reconnect', function () {
-            console.log('MQTT reconnecting...');
+            console.log('MQTT running reconnecting...');
+        });
+
+        mqttCounterClient = createMqttConnection({ clientId: clientSuffix + '_ctr' });
+        mqttCounterClient.on('connect', function () {
+            console.log('MQTT counter terhubung — subscribe', counterTopics.length, 'topic');
+            subscribeMqttTopicsSequential(mqttCounterClient, counterTopics, 'counter');
+            refreshMqttConnectedState();
+        });
+        mqttCounterClient.on('message', function (topic, message) {
+            handleMqttCounterMessage(topic, message);
+        });
+        mqttCounterClient.on('error', function (err) {
+            console.error('MQTT error (counter):', err.message);
+            refreshMqttConnectedState();
+        });
+        mqttCounterClient.on('close', refreshMqttConnectedState);
+        mqttCounterClient.on('reconnect', function () {
+            console.log('MQTT counter reconnecting...');
         });
     } catch (e) {
         console.error('MQTT connect failed:', e);
