@@ -450,17 +450,18 @@ function showScanToast(message) {
     toast._hideTimer = setTimeout(() => { toast.style.opacity = '0'; }, 2800);
 }
 
-function renderCheckpointRow(label, time, isNext) {
+function renderCheckpointRow(label, time, isNext, showWaiting) {
     const done = !!time;
-  const rowClass = done
+    const waiting = isNext && showWaiting !== false;
+    const rowClass = done
         ? 'bg-emerald-50 border-emerald-200'
-        : isNext
+        : waiting
             ? 'bg-amber-50 border-amber-200 ring-1 ring-amber-300'
             : 'bg-slate-50 border-slate-100';
-    const dotClass = done ? 'text-emerald-500' : isNext ? 'text-amber-500 animate-pulse' : 'text-slate-300';
+    const dotClass = done ? 'text-emerald-500' : waiting ? 'text-amber-500 animate-pulse' : 'text-slate-300';
     const statusText = done
         ? `<span class="text-emerald-700 font-black">${time}</span>`
-        : isNext
+        : waiting
             ? '<span class="text-amber-600 font-black text-[10px]">Menunggu scan</span>'
             : '<span class="text-slate-400 font-bold text-[10px]">—</span>';
 
@@ -496,6 +497,7 @@ function renderAreaCard(area) {
     const picName = getOperatorName();
     const running = isJigRunning(area);
     const runningModel = getRunningModel(area);
+    const showWaitingScan = running || !!status.start;
 
     const card = document.createElement('div');
     let cardClass = 'card-inactive';
@@ -525,13 +527,15 @@ function renderAreaCard(area) {
         ${runningModel ? `<div class="flex items-center gap-1.5 mb-1"><span class="w-1.5 h-1.5 bg-violet-500 rounded-full animate-pulse"></span><span class="text-[10px] font-black text-violet-600 truncate">Model: ${escapeHtml(runningModel)}</span></div>` : ''}
         <p class="text-[10px] font-bold text-slate-400 mb-4 italic uppercase">PIC: ${escapeHtml(picName)}</p>
         <div class="space-y-2">
-            ${renderCheckpointRow('START', status.start, nextCp === 'start')}
-            ${renderCheckpointRow('MIDDLE', status.middle, nextCp === 'middle')}
-            ${renderCheckpointRow('END', status.end, nextCp === 'end')}
+            ${renderCheckpointRow('START', status.start, nextCp === 'start', showWaitingScan)}
+            ${renderCheckpointRow('MIDDLE', status.middle, nextCp === 'middle', showWaitingScan)}
+            ${renderCheckpointRow('END', status.end, nextCp === 'end', showWaitingScan)}
         </div>
         ${complete
             ? '<div class="mt-4 text-[10px] text-emerald-700 font-black bg-emerald-100 py-2 rounded-xl text-center uppercase tracking-wider">Checkpoint Lengkap</div>'
-            : `<div class="mt-4 text-[10px] text-slate-500 font-black bg-slate-100 py-2 rounded-xl text-center italic">Scan berikutnya: ${nextCp ? CHECKPOINT_LABELS[nextCp] : '—'}</div>`
+            : showWaitingScan
+                ? `<div class="mt-4 text-[10px] text-slate-500 font-black bg-slate-100 py-2 rounded-xl text-center italic">Scan berikutnya: ${nextCp ? CHECKPOINT_LABELS[nextCp] : '—'}</div>`
+                : ''
         }
         ${adminReset}
     `;
