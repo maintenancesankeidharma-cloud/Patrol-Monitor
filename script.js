@@ -477,8 +477,27 @@ function renderCheckpointRow(label, time, isNext, showWaiting) {
     `;
 }
 
+function normalizeAreaKey(name) {
+    return (name || '').trim().toUpperCase();
+}
+
+function normalizeMqttTopic(topic) {
+    let t = (topic || '').trim().toLowerCase();
+    if (!t.startsWith('/')) t = '/' + t;
+    return t.replace(/\/+/g, '/').replace(/\/$/, '');
+}
+
+function getAreaCounter(areaName) {
+    return areaCounters[normalizeAreaKey(areaName)];
+}
+
+function setAreaCounter(areaName, value) {
+    if (value == null || !Number.isFinite(value)) return;
+    areaCounters[normalizeAreaKey(areaName)] = value;
+}
+
 function isJigRunning(area) {
-    const runningProduct = areaProducts[area.area];
+    const runningProduct = areaProducts[normalizeAreaKey(area.area)] || areaProducts[area.area];
     if (!runningProduct || !area.name) return false;
     const payload = runningProduct.toLowerCase();
     const jigName = area.name.toLowerCase();
@@ -487,7 +506,7 @@ function isJigRunning(area) {
 
 function getRunningModel(area) {
     if (!isJigRunning(area)) return null;
-    return areaProducts[area.area];
+    return areaProducts[normalizeAreaKey(area.area)] || areaProducts[area.area];
 }
 
 function renderAreaCard(area) {
@@ -499,7 +518,7 @@ function renderAreaCard(area) {
     const running = isJigRunning(area);
     const runningModel = getRunningModel(area);
     const showWaitingScan = running || !!status.start;
-    const robotCounter = running && areaCounters[area.area] != null ? areaCounters[area.area] : null;
+    const robotCounter = running ? getAreaCounter(area.area) : null;
 
     const card = document.createElement('div');
     let cardClass = 'card-inactive';
@@ -519,7 +538,7 @@ function renderAreaCard(area) {
             <div class="flex items-center gap-1.5">
                 <span class="text-[10px] font-black text-slate-300">#${String(area.id).padStart(2, '0')}</span>
                 ${running ? '<span class="flex items-center gap-1 bg-violet-600 text-white px-2 py-0.5 rounded-full text-[9px] font-black uppercase"><span style="animation:pulse-dot 1.5s ease-in-out infinite" class="inline-block w-1.5 h-1.5 bg-white rounded-full"></span>Running</span>' : ''}
-                ${robotCounter != null ? `<span class="inline-flex flex-col items-center justify-center bg-sky-600 text-white px-2 py-0.5 rounded-lg text-[8px] font-black leading-tight min-w-[2.75rem]"><span class="uppercase tracking-wide">Counter :</span><span class="text-xs tabular-nums">${robotCounter}</span></span>` : ''}
+                ${running ? `<span class="inline-flex flex-col items-center justify-center bg-sky-600 text-white px-2 py-0.5 rounded-lg text-[8px] font-black leading-tight min-w-[2.75rem]"><span class="uppercase tracking-wide">Counter :</span><span class="text-xs tabular-nums">${robotCounter != null ? robotCounter : '—'}</span></span>` : ''}
                 ${!running && isActive ? '<span class="flex items-center gap-1 bg-amber-500 text-white px-2 py-0.5 rounded-full text-[9px] font-black uppercase"><span style="animation:pulse-dot 1.5s ease-in-out infinite" class="inline-block w-1.5 h-1.5 bg-white rounded-full"></span>Active</span>' : ''}
                 ${complete ? '<span class="flex items-center gap-1 bg-emerald-500 text-white px-2 py-0.5 rounded-full text-[9px] font-black uppercase">Done</span>' : ''}
             </div>
@@ -600,7 +619,7 @@ function renderUI() {
                 ? 'border-amber-200'
                 : 'border-red-200';
 
-        const runningProduct = areaProducts[areaName] || null;
+        const runningProduct = areaProducts[normalizeAreaKey(areaName)] || areaProducts[areaName] || null;
 
         section.innerHTML = `
             <div class="flex flex-col sm:flex-row sm:items-center justify-between mb-4 px-1 gap-2">
@@ -1518,7 +1537,8 @@ function updateProductUI() {
         }
 
         listEl.innerHTML = topicMap.map(entry => {
-            const product = areaProducts[entry.area] || null;
+            const product = areaProducts[normalizeAreaKey(entry.area)] || areaProducts[entry.area] || null;
+            const counter = getAreaCounter(entry.area);
             return `
                 <div class="bg-white/10 backdrop-blur-sm rounded-xl px-4 py-3 flex items-center gap-3">
                     <div class="flex-shrink-0">
@@ -1529,6 +1549,7 @@ function updateProductUI() {
                     <div class="min-w-0 flex-1">
                         <p class="text-[10px] font-black text-white/60 uppercase tracking-wider">${escapeHtml(entry.area)}</p>
                         <p class="text-sm font-black text-white truncate">${product ? escapeHtml(product) : '<span class="text-white/30 italic text-[11px]">Menunggu data...</span>'}</p>
+                        ${counter != null ? `<p class="text-[10px] font-black text-sky-200 mt-0.5">Counter: ${counter}</p>` : ''}
                     </div>
                 </div>
             `;
@@ -1539,22 +1560,57 @@ function updateProductUI() {
 function getTopicToAreaMap() {
     if (typeof MQTT_TOPIC_MAP === 'undefined' || !Array.isArray(MQTT_TOPIC_MAP)) return {};
     const map = {};
-    MQTT_TOPIC_MAP.forEach(entry => { map[entry.topic] = entry.area; });
+    MQTT_TOPIC_MAP.forEach(entry => {
+        const areaKey = normalizeAreaKey(entry.area);
+        map[entry.topic] = areaKey;
+        map[normalizeMqttTopic(entry.topic)] = areaKey;
+    });
     return map;
 }
 
-function getCounterTopicForEntry(entry) {
-    if (entry.counterTopic) return entry.counterTopic;
-    return entry.topic.replace(/\/running$/, '-counter-robot');
+function getCounterTopicVariants(entry) {
+    const base = entry.topic.replace(/\/running$/i, '');
+    const assyNum = base.match(/assy(\d+)/i);
+    const variants = new Set();
+    if (entry.counterTopic) variants.add(entry.counterTopic);
+    variants.add(`${base}-counter-robot`);
+    variants.add(`${base}/counter-robot`);
+    if (assyNum) {
+        variants.add(`/assy${assyNum[1]}-counter-robot`);
+        variants.add(`/assy${assyNum[1]}/counter-robot`);
+        variants.add(`assy${assyNum[1]}-counter-robot`);
+    }
+    return [...variants];
 }
 
 function getCounterTopicToAreaMap() {
     if (typeof MQTT_TOPIC_MAP === 'undefined' || !Array.isArray(MQTT_TOPIC_MAP)) return {};
     const map = {};
     MQTT_TOPIC_MAP.forEach(entry => {
-        map[getCounterTopicForEntry(entry)] = entry.area;
+        getCounterTopicVariants(entry).forEach(topic => {
+            map[normalizeMqttTopic(topic)] = normalizeAreaKey(entry.area);
+        });
     });
     return map;
+}
+
+function resolveCounterAreaFromTopic(topic) {
+    const counterTopicToArea = getCounterTopicToAreaMap();
+    const normalized = normalizeMqttTopic(topic);
+    if (counterTopicToArea[normalized]) return counterTopicToArea[normalized];
+
+    const match = normalized.match(/\/assy(\d+)(?:-|\/)counter-robot$/);
+    if (match) return 'ASSY' + match[1];
+    return null;
+}
+
+function getAllCounterTopics() {
+    if (typeof MQTT_TOPIC_MAP === 'undefined' || !Array.isArray(MQTT_TOPIC_MAP)) return [];
+    const topics = new Set();
+    MQTT_TOPIC_MAP.forEach(entry => {
+        getCounterTopicVariants(entry).forEach(t => topics.add(normalizeMqttTopic(t)));
+    });
+    return [...topics];
 }
 
 function parseProductPayload(message) {
@@ -1562,7 +1618,7 @@ function parseProductPayload(message) {
     if (!raw) return null;
     try {
         const json = JSON.parse(raw);
-        return json.product || json.model || json.name || raw;
+        return json.product || json.model || json.name || json.part_number || raw;
     } catch (_) {
         return raw;
     }
@@ -1573,12 +1629,17 @@ function parseCounterPayload(message) {
     if (!raw) return null;
     try {
         const json = JSON.parse(raw);
-        if (json.counter_robot == null || json.counter_robot === '') return null;
-        const n = Number(json.counter_robot);
+        const value = json.counter_robot ?? json.counterRobot ?? json.counter;
+        if (value == null || value === '') return null;
+        const n = Number(value);
         return Number.isFinite(n) ? n : null;
     } catch (_) {
         return null;
     }
+}
+
+function tryExtractCounterFromMessage(message) {
+    return parseCounterPayload(message);
 }
 
 function connectMQTT() {
@@ -1588,9 +1649,8 @@ function connectMQTT() {
     }
 
     const topicToArea = getTopicToAreaMap();
-    const counterTopicToArea = getCounterTopicToAreaMap();
+    const counterTopics = getAllCounterTopics();
     const perAreaTopics = Object.keys(topicToArea);
-    const counterTopics = Object.keys(counterTopicToArea);
 
     try {
         mqttClient = mqtt.connect(MQTT_CONFIG.broker, {
@@ -1617,12 +1677,14 @@ function connectMQTT() {
         });
 
         mqttClient.on('message', function (topic, message) {
-            const counterArea = counterTopicToArea[topic];
+            const counterArea = resolveCounterAreaFromTopic(topic);
             if (counterArea) {
-                const counter = parseCounterPayload(message);
+                const counter = tryExtractCounterFromMessage(message);
                 if (counter != null) {
-                    areaCounters[counterArea] = counter;
+                    setAreaCounter(counterArea, counter);
+                    console.log('Counter robot:', counterArea, counter, '←', topic);
                     renderUI();
+                    updateProductUI();
                 }
                 return;
             }
@@ -1637,9 +1699,12 @@ function connectMQTT() {
                 return;
             }
 
-            const areaName = topicToArea[topic];
+            const areaName = topicToArea[topic] || topicToArea[normalizeMqttTopic(topic)];
             if (areaName) {
-                areaProducts[areaName] = product;
+                const key = normalizeAreaKey(areaName);
+                areaProducts[key] = product;
+                const counter = tryExtractCounterFromMessage(message);
+                if (counter != null) setAreaCounter(key, counter);
                 renderUI();
                 updateProductUI();
             }
