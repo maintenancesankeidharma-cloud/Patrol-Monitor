@@ -290,7 +290,7 @@ function getTodayRange() {
 function buildDailyStatusFromLogs(logs) {
     const status = {};
     areas.forEach(j => {
-        status[j.id] = { start: null, middle: null, end: null };
+        status[j.id] = { start: null, middle: null, end: null, picName: null, lastScanAt: null };
     });
     if (!logs) return status;
 
@@ -298,13 +298,29 @@ function buildDailyStatusFromLogs(logs) {
         const jigId = log.jig_id;
         const cp = log.checkpoint;
         if (!status[jigId]) {
-            status[jigId] = { start: null, middle: null, end: null };
+            status[jigId] = { start: null, middle: null, end: null, picName: null, lastScanAt: null };
         }
         if (CHECKPOINTS.includes(cp) && !status[jigId][cp]) {
             status[jigId][cp] = formatTime(log.created_at);
         }
+        if (CHECKPOINTS.includes(cp)) {
+            const scanTime = new Date(log.created_at);
+            if (!status[jigId].lastScanAt || scanTime > new Date(status[jigId].lastScanAt)) {
+                status[jigId].lastScanAt = log.created_at;
+                const name = resolveOperatorName(log.operator_email) || resolveOperatorName(log.operator_name);
+                if (name) status[jigId].picName = name;
+            }
+        }
     });
     return status;
+}
+
+function getCardPicName(areaId) {
+    const status = dailyStatus[areaId] || {};
+    if (isCurrentUserLeader()) {
+        return status.picName || '—';
+    }
+    return getOperatorName();
 }
 
 function countCompletedAreas(status) {
@@ -419,9 +435,11 @@ async function handleBarcodeScan(areaId, source) {
         }
 
         if (!dailyStatus[area.id]) {
-            dailyStatus[area.id] = { start: null, middle: null, end: null };
+            dailyStatus[area.id] = { start: null, middle: null, end: null, picName: null, lastScanAt: null };
         }
         dailyStatus[area.id][nextCp] = formatTime(new Date());
+        dailyStatus[area.id].picName = getOperatorName();
+        dailyStatus[area.id].lastScanAt = new Date().toISOString();
         renderUI();
 
         const label = CHECKPOINT_LABELS[nextCp];
@@ -515,7 +533,7 @@ function renderAreaCard(area) {
     const nextCp = getNextCheckpoint(area.id);
     const complete = !nextCp;
     const progressCount = CHECKPOINTS.filter(cp => status[cp]).length;
-    const picName = getOperatorName();
+    const picName = getCardPicName(area.id);
     const running = isJigRunning(area);
     const runningModel = getRunningModel(area);
     const showWaitingScan = running || !!status.start;
